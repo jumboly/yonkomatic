@@ -333,6 +333,29 @@ def _resolve_theme_filename(cfg: Config, content_dir: Path) -> str:
     return f"{month}.md" if monthly.exists() else "default.md"
 
 
+def _notify_failure(cfg: Config, message: str) -> None:
+    """Post a non-blocking failure alert via Slack if it is enabled and configured.
+
+    Why isolated from _build_publishers: notification must not require any
+    other publisher to be set up, and a missing Slack token should silently
+    degrade to stderr rather than break the cron's error handling itself.
+    """
+    if not cfg.publishers.slack.enabled:
+        return
+    token = os.environ.get(cfg.publishers.slack.token_env)
+    channel = os.environ.get(cfg.publishers.slack.channel_env)
+    if not token or not channel:
+        err_console.print(
+            f"[yellow]notify skipped:[/yellow] Slack token/channel not set ({message})"
+        )
+        return
+    notifier = SlackPublisher(token=token, channel=channel)
+    if notifier.notify_failure(message):
+        err_console.print(f"[dim]·[/dim] notified Slack: {message}")
+    else:
+        err_console.print(f"[yellow]notify failed:[/yellow] {message}")
+
+
 def _build_publishers(cfg: Config) -> list[Publisher]:
     """Instantiate every enabled publisher; secrets are read from os.environ here."""
     publishers: list[Publisher] = []
@@ -636,11 +659,12 @@ def publish_today(
     week_path = scenarios_dir / f"{target_week}.json"
 
     if not week_path.exists():
-        err_console.print(
-            f"[red]error:[/red] scenarios file {week_path} not found "
-            f"(run generate-scenarios --week {target_week} first, "
-            "or push the file to the user branch)."
+        msg = (
+            f"scenarios file {week_path} not found for {target_week} "
+            f"(run generate-scenarios --week {target_week} first)"
         )
+        err_console.print(f"[red]error:[/red] {msg}")
+        _notify_failure(cfg, msg)
         raise typer.Exit(code=1)
 
     with _fail_on("load week scenarios"):
@@ -662,22 +686,35 @@ def publish_today(
         None,
     )
     if target is None:
-        err_console.print(
-            f"[red]error:[/red] episode #{target_n} is not in {week_path} "
+        msg = (
+            f"episode #{target_n} is not in {week_path} "
             f"(only {len(week_data.episodes)} episode(s) defined for {target_week})"
         )
+        err_console.print(f"[red]error:[/red] {msg}")
+        _notify_failure(cfg, msg)
         raise typer.Exit(code=1)
 
-    _publish_episode_pipeline(
-        cfg=cfg,
-        episode_data=target,
-        pub_date=pub_date,
-        content_dir=content_dir,
-        refs=refs,
-        state_path=state_path,
-        archive_dir=archive_dir,
-        dry_run=dry_run,
-    )
+    try:
+        _publish_episode_pipeline(
+            cfg=cfg,
+            episode_data=target,
+            pub_date=pub_date,
+            content_dir=content_dir,
+            refs=refs,
+            state_path=state_path,
+            archive_dir=archive_dir,
+            dry_run=dry_run,
+        )
+    except typer.Exit:
+        # The pipeline already printed a specific error; the notification
+        # carries the cron-level context (which episode/date/week) so an
+        # operator can act without grepping the GHA log.
+        _notify_failure(
+            cfg,
+            f"publish-today failed for {pub_date} "
+            f"(episode #{target_n} 「{target.title}」 of {target_week})",
+        )
+        raise
 
 
 @app.command("generate-scenarios")

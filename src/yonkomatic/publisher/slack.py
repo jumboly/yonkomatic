@@ -53,3 +53,19 @@ class SlackPublisher:
             artifact_id=file_id,
             url=permalink,
         )
+
+    def notify_failure(self, text: str) -> bool:
+        """Post a plain warning to the configured channel. Never raises.
+
+        Why bool return: the cron caller wants to know whether the alert
+        reached Slack so it can fall back to stderr, but a failed alert
+        must not abort recovery code paths around it.
+        """
+        try:
+            self.client.chat_postMessage(
+                channel=self.channel,
+                text=f":warning: yonkomatic: {text}",
+            )
+        except Exception:
+            return False
+        return True

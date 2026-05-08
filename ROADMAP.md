@@ -8,11 +8,11 @@
 
 ## 現在地
 
-- **完了**: Step 1, Step 2, Step 3, Step 4a, Step 4b, **Step 4c (cron + publish-today)**
-- **次**: Step 4d (エラー通知)
+- **完了**: Step 1, Step 2, Step 3, **Step 4 (4a/4b/4c/4d 全て)**
+- **次**: Step 5 (OSS 公開準備)
 - **ブロッカー**: なし
 
-最終更新: 2026-05-09 (Step 4c 完了時)
+最終更新: 2026-05-09 (Step 4 完了時)
 
 ---
 
@@ -59,9 +59,9 @@
 - PIL テキストオーバーレイ — `text_rendering.mode` の `fallback`/`always` モード本体
 - Gemini Vision 品質チェック
 
-### ⏳ Step 4 — 週次シナリオ + 時事ネタ + 自動化 (進行中)
+### ✅ Step 4 — 週次シナリオ + 時事ネタ + 自動化 (完了)
 
-サブステップ単位で commit する方針。
+サブステップ単位で commit。
 
 - ✅ **Step 4a — `scenario/generator.py` + `generate-scenarios` CLI** (commit `76e8061`)
   - `scenario/generator.py`: `generate_week(claude, pack, week, news_headlines=None) -> ScenarioWeek` (1 コール 7 話一括、`_TEMPERATURE=0.8` / `_MAX_TOKENS=8192`)
@@ -83,9 +83,17 @@
   - 既存 `publish` 関数の本体を `_publish_episode_pipeline()` ヘルパに切り出し、`publish` と `publish-today` で共有
   - ローカル `publish-today --dry-run` で `scenarios/2026-W19.json` から episode 2 が自動選択されパイプライン通過確認済み
   - 利用者ブランチで `.gitignore` の `/scenarios/` `/state/` `/output/` `/docs/*` を外す (or `git add -f` を使う) 必要あり — SETUP.md (Step 5) で記述予定
-- ⏳ **Step 4d** — `SlackPublisher.notify_failure()` + `publish-today` の障害通知挿入
+- ✅ **Step 4d — エラー通知** (このコミット)
+  - `SlackPublisher.notify_failure(text) -> bool`: `chat_postMessage` を投げ、失敗は false (例外昇格させない)
+  - `cli.py` に `_notify_failure(cfg, message)` ヘルパ。Slack publisher が `enabled` かつ token/channel 揃っているときだけ送信、それ以外は stderr ログのみ
+  - `publish-today` の 3 つの障害ポイントで通知:
+    - `scenarios/{week}.json` 不在 (シナリオ枯渇)
+    - 該当 episode 不在 (週内 8 話目以上要求)
+    - `_publish_episode_pipeline` が `typer.Exit` を上げた (Claude/Gemini/Compose/Validate/Publish のいずれか)
+  - Slack 通知が成功すれば `· notified Slack: ...`、失敗すれば `notify failed: ...` を stderr に
+  - `ANTHROPIC_API_KEY=invalid` で 401 → Slack に :warning: を確認、scenarios 不在ケースも同様に通知発火確認済み (exit code 1 を維持)
 
-完了条件: 1 週間放置して 7 話自動投稿できる。
+完了条件: 1 週間放置して 7 話自動投稿できる。weekly/daily ワークフローのライブ運用は利用者ブランチで `workflow_dispatch` 手動 trigger → cron 観察で検証する。
 
 ### ⏳ Step 5 — OSS 公開準備 (未着手)
 
@@ -104,6 +112,8 @@
 
 新しい決定が出たら頭に追加。古いものは削除せず残す。
 
+- **2026-05-09** エラー通知は **既存 SlackPublisher を流用**して `notify_failure` メソッドを生やす方針 (新モジュールは作らない)。Discord 通知は Step 5 以降。Slack publisher が disabled / 認証情報未設定の場合は stderr ログにフォールバック。
+- **2026-05-09** `publish-today` は `_publish_episode_pipeline` を `try: ... except typer.Exit` でラップして cron-level コンテキスト (date / episode / week / title) を含めた通知メッセージを送る。pipeline 内部のエラーメッセージはそのまま console に流し、通知は要約だけにする (Slack の表示が短い + GHA log で詳細は追えるため)。
 - **2026-05-09** weekly-scenarios cron は「翌週」を生成する。日曜 23:00 JST は ISO 週の最終時間で、その時点の `isocalendar()` はまだ今週を返すため、`TZ=Asia/Tokyo date -d '+1 day'` で次週を明示計算。daily-publish 側は `--date` (デフォルト today) → `_iso_week_of(...)` で逆算するので「月曜から正しく新シナリオを引く」フローが両側で整合する。
 - **2026-05-09** publish と publish-today は `_publish_episode_pipeline()` (内部ヘルパ) を共有。同じ Stage1-6 を 2 ヶ所に書きたくないため、scenario の **取得方法** だけが分岐するインターフェースに揃えた。
 - **2026-05-09** GitHub Actions ワークフローの commit/push は **利用者ブランチ前提**。main の `.gitignore` で `/scenarios/`/`/state/`/`/output/`/`/docs/*` は無視されているので、利用者は fork 後に該当パスを `.gitignore` から外す (or 該当ファイルを `git add -f`)。SETUP.md (Step 5) で具体的な手順を案内。
