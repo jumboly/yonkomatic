@@ -1,0 +1,52 @@
+name: weekly-scenarios
+
+# Why Sun 14:00 UTC = 23:00 JST: SPEC schedule.scenario_generation_time.
+# Why "+1 day" for the week: Sun 23:00 JST is the last hour of the current
+# ISO week, so we generate scenarios for the *next* week which starts the
+# following Monday (when daily-publish first reads them).
+on:
+  schedule:
+    - cron: "0 14 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Compute target ISO week (next Monday's week)
+        id: week
+        run: echo "value=$(TZ=Asia/Tokyo date -d '+1 day' +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Generate scenarios
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: uv run yonkomatic generate-scenarios --week "${{ steps.week.outputs.value }}"
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scenarios/
+          if git diff --cached --quiet; then
+            echo "no scenario changes (already up to date)"
+          else
+            git commit -m "bot: scenarios for week ${{ steps.week.outputs.value }}"
+            # Why pull --rebase --autostash: a daily-publish run may have
+            # advanced main since checkout; without this push would 403.
+            git pull --rebase --autostash
+            git push
+          fi

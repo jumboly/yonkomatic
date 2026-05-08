@@ -32,7 +32,7 @@ from yonkomatic.publisher.base import Episode, Publisher, PublishResult
 from yonkomatic.publisher.slack import SlackPublisher
 from yonkomatic.publisher.static_site import StaticSitePublisher
 from yonkomatic.scenario.generator import generate_week
-from yonkomatic.scenario.schema import ScenarioEpisode
+from yonkomatic.scenario.schema import ScenarioEpisode, ScenarioWeek
 from yonkomatic.state.repo import HistoryEntry, StateStore
 
 app = typer.Typer(
@@ -313,9 +313,12 @@ def _today_in_configured_tz(cfg: Config) -> str:
     return datetime.now(ZoneInfo(cfg.schedule.timezone)).date().isoformat()
 
 
+def _iso_week_of(date_str: str) -> str:
+    return _date.fromisoformat(date_str).strftime("%G-W%V")
+
+
 def _current_iso_week(cfg: Config) -> str:
-    iso = datetime.now(ZoneInfo(cfg.schedule.timezone)).isocalendar()
-    return f"{iso.year:04d}-W{iso.week:02d}"
+    return _iso_week_of(_today_in_configured_tz(cfg))
 
 
 def _resolve_theme_filename(cfg: Config, content_dir: Path) -> str:
@@ -483,6 +486,29 @@ def publish(
         )
 
     pub_date = date_str or _today_in_configured_tz(cfg)
+    _publish_episode_pipeline(
+        cfg=cfg,
+        episode_data=episode_data,
+        pub_date=pub_date,
+        content_dir=content_dir,
+        refs=refs,
+        state_path=state_path,
+        archive_dir=archive_dir,
+        dry_run=dry_run,
+    )
+
+
+def _publish_episode_pipeline(
+    *,
+    cfg: Config,
+    episode_data: ScenarioEpisode,
+    pub_date: str,
+    content_dir: Path,
+    refs: list[Path],
+    state_path: Path,
+    archive_dir: Path,
+    dry_run: bool,
+) -> None:
     console.print(
         f"publishing for [cyan]{pub_date}[/cyan]: 「{episode_data.title}」 "
         f"(episode {episode_data.episode_number})"
@@ -573,6 +599,85 @@ def publish(
     )
     state.append(entry)
     console.print(f"  state updated: [dim]{state_path}[/dim]")
+
+
+@app.command("publish-today")
+def publish_today(
+    date_str: str | None = typer.Option(
+        None,
+        "--date",
+        help="ISO date YYYY-MM-DD. Defaults to today in config schedule.timezone.",
+    ),
+    content_dir: Path = typer.Option(
+        Path("examples/minimal"),
+        "--content",
+        help="Directory holding characters/, world/, samples/, themes/.",
+    ),
+    refs: list[Path] = typer.Option(
+        [],
+        "--refs",
+        "-r",
+        help="Optional character / style reference images.",
+    ),
+    config_path: Path = typer.Option(Path("config.yaml"), "--config"),
+    state_path: Path = typer.Option(Path("state/state.json"), "--state"),
+    scenarios_dir: Path = typer.Option(
+        Path("scenarios"),
+        "--scenarios-dir",
+        help="Directory containing {YYYY-Www}.json scenario files.",
+    ),
+    archive_dir: Path = typer.Option(Path("output/archive"), "--archive-dir"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+) -> None:
+    """Pick the next episode for today's ISO week from scenarios/, then publish."""
+    cfg = load_config(config_path)
+    pub_date = date_str or _today_in_configured_tz(cfg)
+    target_week = _iso_week_of(pub_date)
+    week_path = scenarios_dir / f"{target_week}.json"
+
+    if not week_path.exists():
+        err_console.print(
+            f"[red]error:[/red] scenarios file {week_path} not found "
+            f"(run generate-scenarios --week {target_week} first, "
+            "or push the file to the user branch)."
+        )
+        raise typer.Exit(code=1)
+
+    with _fail_on("load week scenarios"):
+        week_data = ScenarioWeek.model_validate_json(
+            week_path.read_text(encoding="utf-8")
+        )
+
+    state = StateStore(state_path).load()
+    if (
+        state.current_week_index == target_week
+        and state.last_published_episode is not None
+    ):
+        target_n = state.last_published_episode + 1
+    else:
+        target_n = 1
+
+    target = next(
+        (ep for ep in week_data.episodes if ep.episode_number == target_n),
+        None,
+    )
+    if target is None:
+        err_console.print(
+            f"[red]error:[/red] episode #{target_n} is not in {week_path} "
+            f"(only {len(week_data.episodes)} episode(s) defined for {target_week})"
+        )
+        raise typer.Exit(code=1)
+
+    _publish_episode_pipeline(
+        cfg=cfg,
+        episode_data=target,
+        pub_date=pub_date,
+        content_dir=content_dir,
+        refs=refs,
+        state_path=state_path,
+        archive_dir=archive_dir,
+        dry_run=dry_run,
+    )
 
 
 @app.command("generate-scenarios")

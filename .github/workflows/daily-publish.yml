@@ -1,0 +1,56 @@
+name: daily-publish
+
+# Why 00:00 UTC = 09:00 JST: SPEC schedule.publish_time.
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+# Why contents:write: bot pushes state/site updates so progress survives runs.
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Publish today's episode
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_AI_STUDIO_API_KEY: ${{ secrets.GOOGLE_AI_STUDIO_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+        run: uv run yonkomatic publish-today
+
+      - name: Commit and push state + site updates
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Why per-path guard: a fresh user branch may not yet have docs/
+          # (static_site disabled) or output/archive/ (first run); skipping
+          # nonexistent paths is the only suppression we want here.
+          for p in state docs output/archive; do
+            [ -e "$p" ] && git add "$p"
+          done
+          if git diff --cached --quiet; then
+            echo "no committable changes (publish skipped or no enabled committers)"
+          else
+            git commit -m "bot: published $(TZ=Asia/Tokyo date +%Y-%m-%d)"
+            # Why pull --rebase --autostash before push: weekly-scenarios
+            # may have advanced main between checkout and push; without
+            # this the daily push would 403 on non-fast-forward.
+            git pull --rebase --autostash
+            git push
+          fi

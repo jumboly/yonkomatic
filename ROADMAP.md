@@ -8,11 +8,11 @@
 
 ## 現在地
 
-- **完了**: Step 1, Step 2, Step 3, Step 4a, **Step 4b (news fetcher)**
-- **次**: Step 4c (GitHub Actions cron + publish-today)
+- **完了**: Step 1, Step 2, Step 3, Step 4a, Step 4b, **Step 4c (cron + publish-today)**
+- **次**: Step 4d (エラー通知)
 - **ブロッカー**: なし
 
-最終更新: 2026-05-09 (Step 4b 完了時)
+最終更新: 2026-05-09 (Step 4c 完了時)
 
 ---
 
@@ -70,13 +70,19 @@
   - `--week` 省略時は今日含む ISO 週を自動算出
   - テーマ解決: `themes/{YYYY-MM}.md` 優先 → `default.md` フォールバック
   - 実 API で 2026-W19 の 7 話生成 → `publish --dry-run` で Step 3 パイプラインまで通る確認済み
-- ✅ **Step 4b — `news/fetcher.py` 統合** (このコミット)
-  - `news/fetcher.py`: `fetch_recent_headlines(news_cfg) -> list[str]`、feedparser で feed 単位の例外を吸収 (Publisher と同じ独立性)
+- ✅ **Step 4b — `news/fetcher.py` 統合** (commit `3a6a033`)
+  - `news/fetcher.py`: `fetch_recent_headlines(news_cfg) -> list[str]`、feedparser で feed 単位の例外を吸収
+  - socket timeout を 15s でスコープ設定 (stalled feed が weekly cron をハングさせないため)
   - `generate-scenarios` で `cfg.news.enabled` かつ `--no-news` 未指定なら自動 fetch
-  - `yonkomatic test news` で件数 + 先頭 10 件をプリント (動作確認用)
-  - `pyproject.toml` に `feedparser>=6.0` 追加
-  - 実フィード (Yahoo entertainment + sports) で 16 headlines 取得 → 2026-W20 シナリオ生成、SPEC の安全指針通り訃報・実在人物が直接反映されないことを確認
-- ⏳ **Step 4c** — `.github/workflows/weekly-scenarios.yml` (日曜 23:00 JST) + `daily-publish.yml` (毎日 9:00 JST)、`yonkomatic publish-today` (state から episode 自動選択)
+  - `yonkomatic test news` 追加、`pyproject.toml` に `feedparser>=6.0`
+  - 実フィードで 16 headlines → 2026-W20 を生成、SPEC 安全指針通り訃報・実在人物が直接反映されない確認
+- ✅ **Step 4c — GitHub Actions cron + `publish-today`** (このコミット)
+  - `.github/workflows/weekly-scenarios.yml`: 日曜 14:00 UTC (= 23:00 JST) cron + `workflow_dispatch`、`TZ=Asia/Tokyo date -d '+1 day' +%G-W%V` で **翌週の ISO 週** を計算して `generate-scenarios --week ...`、scenarios/ を bot commit
+  - `.github/workflows/daily-publish.yml`: 毎日 00:00 UTC (= 09:00 JST) cron、`publish-today` 後に state.json + docs/ + output/archive/ を bot commit
+  - `yonkomatic publish-today [--date]` 新コマンド: pub_date から ISO 週を逆算 → scenarios/{week}.json をロード → state の `current_week_index`/`last_published_episode` から次 episode 番号を選択 (週またぎは 1 にリセット)
+  - 既存 `publish` 関数の本体を `_publish_episode_pipeline()` ヘルパに切り出し、`publish` と `publish-today` で共有
+  - ローカル `publish-today --dry-run` で `scenarios/2026-W19.json` から episode 2 が自動選択されパイプライン通過確認済み
+  - 利用者ブランチで `.gitignore` の `/scenarios/` `/state/` `/output/` `/docs/*` を外す (or `git add -f` を使う) 必要あり — SETUP.md (Step 5) で記述予定
 - ⏳ **Step 4d** — `SlackPublisher.notify_failure()` + `publish-today` の障害通知挿入
 
 完了条件: 1 週間放置して 7 話自動投稿できる。
@@ -98,6 +104,9 @@
 
 新しい決定が出たら頭に追加。古いものは削除せず残す。
 
+- **2026-05-09** weekly-scenarios cron は「翌週」を生成する。日曜 23:00 JST は ISO 週の最終時間で、その時点の `isocalendar()` はまだ今週を返すため、`TZ=Asia/Tokyo date -d '+1 day'` で次週を明示計算。daily-publish 側は `--date` (デフォルト today) → `_iso_week_of(...)` で逆算するので「月曜から正しく新シナリオを引く」フローが両側で整合する。
+- **2026-05-09** publish と publish-today は `_publish_episode_pipeline()` (内部ヘルパ) を共有。同じ Stage1-6 を 2 ヶ所に書きたくないため、scenario の **取得方法** だけが分岐するインターフェースに揃えた。
+- **2026-05-09** GitHub Actions ワークフローの commit/push は **利用者ブランチ前提**。main の `.gitignore` で `/scenarios/`/`/state/`/`/output/`/`/docs/*` は無視されているので、利用者は fork 後に該当パスを `.gitignore` から外す (or 該当ファイルを `git add -f`)。SETUP.md (Step 5) で具体的な手順を案内。
 - **2026-05-09** news fetcher は **feed 単位で例外吸収**して空 list を返す方針。Publisher の独立性 (1 つの障害が全体を倒さない) と同じ思想で、ニュース取得失敗はシナリオ生成を止めない。
 - **2026-05-09** Step 4 はサブステップ 4a/4b/4c/4d で commit を分ける。各完了時に `/simplify` レビュー + ROADMAP 更新 + ユーザーレビュー依頼。
 - **2026-05-09** 週次シナリオ生成は **毎回 Claude を叩く**。`scenarios/{week}.json` は `--force` がない限り上書きしない (誤って上書きすると過去アーカイブとの整合が壊れるため)。
