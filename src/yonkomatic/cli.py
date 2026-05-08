@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import mimetypes
 import os
-import sys
 import tempfile
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date as _date
 from pathlib import Path
 
@@ -17,8 +17,8 @@ from rich.console import Console
 
 from yonkomatic import __version__
 from yonkomatic.ai.claude_client import ClaudeClient
-from yonkomatic.ai.gemini_client import GeminiImageClient
-from yonkomatic.config import load_config
+from yonkomatic.ai.gemini_client import GeminiImageClient, GeminiImageResult
+from yonkomatic.config import Config, load_config
 from yonkomatic.panel.description import ContentPack, build_image_prompt
 from yonkomatic.publisher.base import Episode
 from yonkomatic.publisher.slack import SlackPublisher
@@ -42,12 +42,33 @@ def version() -> None:
     console.print(f"yonkomatic {__version__}")
 
 
+@contextmanager
+def _fail_on(action: str) -> Iterator[None]:
+    """Convert any exception into a red one-liner + ``typer.Exit(1)``."""
+    try:
+        yield
+    except Exception as e:
+        err_console.print(f"[red]✗ {action}:[/red] {e}")
+        raise typer.Exit(code=1) from e
+
+
+def _require_env(name: str, *, hint: str = "") -> str:
+    value = os.environ.get(name)
+    if not value:
+        msg = f"[red]error:[/red] environment variable {name} is not set."
+        if hint:
+            msg += f" {hint}"
+        err_console.print(msg)
+        raise typer.Exit(code=1)
+    return value
+
+
 def _save_image(output: Path, image_bytes: bytes, mime_type: str) -> Path:
     """Save image bytes, fixing the extension to match the actual MIME type.
 
-    Gemini may return JPEG even when the rest of the pipeline assumed PNG —
-    the Gemini API does not expose ``output_mime_type``. Aligning extension
-    with content avoids downstream tools (Slack, browsers) misreading the file.
+    Why: Gemini API does not honor ``output_mime_type`` and may return JPEG
+    when callers asked for ``.png`` — aligning extension with content avoids
+    downstream tools (Slack, browsers) misreading the file.
     """
     actual_ext = mimetypes.guess_extension(mime_type) or ".bin"
     if output.suffix.lower() != actual_ext.lower():
@@ -60,9 +81,8 @@ def _save_image(output: Path, image_bytes: bytes, mime_type: str) -> Path:
 def _generate_test_image(output_path: Path) -> None:
     """Render a small 4-panel-style PNG used to verify Slack delivery.
 
-    Pillow's default bitmap font is used so the test does not depend on
-    Noto Sans JP being downloaded yet — Step 1 only needs to prove the
-    publisher pipeline works end-to-end.
+    Why default font: avoids dependence on Noto Sans JP being downloaded —
+    the test only needs to prove the publisher pipeline works end-to-end.
     """
     width, height = 600, 800
     panel_height = height // 4
@@ -83,12 +103,35 @@ def _generate_test_image(output_path: Path) -> None:
     for i, label in enumerate(labels):
         top = i * panel_height
         bottom = top + panel_height
-        # Frame
         draw.rectangle((10, top + 10, width - 10, bottom - 10), outline=(40, 40, 40), width=3)
         draw.text((30, top + 30), label, fill=(20, 20, 20), font=font)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(output_path, format="PNG")
+
+
+def _run_gemini(
+    cfg: Config,
+    *,
+    prompt: str,
+    refs: list[Path],
+    action: str = "generation failed",
+) -> GeminiImageResult:
+    """Call Gemini using config-driven defaults, with a uniform error frame."""
+    api_key = _require_env(cfg.ai.image_api_key_env)
+    client = GeminiImageClient(model=cfg.ai.image_model, api_key=api_key)
+    console.print(
+        f"calling [cyan]{cfg.ai.image_model}[/cyan] "
+        f"(aspect={cfg.ai.aspect_ratio}, size={cfg.ai.image_size})…"
+    )
+    with _fail_on(action):
+        return client.generate_image(
+            prompt=prompt,
+            reference_images=refs or None,
+            aspect_ratio=cfg.ai.aspect_ratio,
+            image_size=cfg.ai.image_size,
+            max_attempts=cfg.ai.max_image_retries,
+        )
 
 
 @test_app.command("slack")
@@ -109,19 +152,10 @@ def test_slack(
     cfg = load_config(config_path)
     slack_cfg = cfg.publishers.slack
 
-    token = os.environ.get(slack_cfg.token_env)
-    if not token:
-        err_console.print(
-            f"[red]error:[/red] environment variable {slack_cfg.token_env} is not set."
-        )
-        raise typer.Exit(code=1)
-
-    target_channel = channel or os.environ.get(slack_cfg.channel_env)
-    if not target_channel:
-        err_console.print(
-            f"[red]error:[/red] no channel given and {slack_cfg.channel_env} is not set."
-        )
-        raise typer.Exit(code=1)
+    token = _require_env(slack_cfg.token_env)
+    target_channel = channel or _require_env(
+        slack_cfg.channel_env, hint="(or pass --channel)"
+    )
 
     image_path = Path(tempfile.gettempdir()) / f"yonkomatic-test-{uuid.uuid4().hex}.png"
     _generate_test_image(image_path)
@@ -139,16 +173,15 @@ def test_slack(
     console.print(f"posting to Slack channel [cyan]{target_channel}[/cyan]…")
     result = publisher.publish(episode, image_path)
 
-    if result.ok:
-        console.print("[green]✓ posted successfully[/green]")
-        if result.url:
-            console.print(f"  permalink: {result.url}")
-        if result.artifact_id:
-            console.print(f"  file_id:   {result.artifact_id}")
-        sys.exit(0)
-    else:
+    if not result.ok:
         err_console.print(f"[red]✗ post failed:[/red] {result.error}")
-        sys.exit(1)
+        raise typer.Exit(code=1)
+
+    console.print("[green]✓ posted successfully[/green]")
+    if result.url:
+        console.print(f"  permalink: {result.url}")
+    if result.artifact_id:
+        console.print(f"  file_id:   {result.artifact_id}")
 
 
 @test_app.command("gemini")
@@ -169,31 +202,17 @@ def test_gemini(
         Path("output/test-gemini.png"),
         "--output",
         "-o",
-        help="Where to save the generated PNG.",
+        help="Where to save the generated image (extension auto-corrected to actual MIME).",
     ),
     config_path: Path = typer.Option(Path("config.yaml"), "--config"),
 ) -> None:
     """Generate one image with Gemini and save it locally."""
     cfg = load_config(config_path)
-
-    client = GeminiImageClient(model=cfg.ai.image_model)
-    console.print(
-        f"calling [cyan]{cfg.ai.image_model}[/cyan] (aspect={cfg.ai.aspect_ratio}, size={cfg.ai.image_size})…"
-    )
-    try:
-        result = client.generate_image(
-            prompt=prompt,
-            reference_images=refs or None,
-            aspect_ratio=cfg.ai.aspect_ratio,
-            image_size=cfg.ai.image_size,
-            max_attempts=cfg.ai.max_image_retries,
-        )
-    except Exception as e:
-        err_console.print(f"[red]✗ generation failed:[/red] {e}")
-        sys.exit(1)
-
+    result = _run_gemini(cfg, prompt=prompt, refs=refs)
     saved = _save_image(output, result.image_bytes, result.mime_type)
-    console.print(f"[green]✓ saved[/green] {saved} ({len(result.image_bytes)} bytes, {result.mime_type})")
+    console.print(
+        f"[green]✓ saved[/green] {saved} ({len(result.image_bytes)} bytes, {result.mime_type})"
+    )
 
 
 @test_app.command("panel")
@@ -219,7 +238,7 @@ def test_panel(
         Path("output/test-panel.png"),
         "--output",
         "-o",
-        help="Where to save the generated 4-panel PNG.",
+        help="Where to save the generated 4-panel image.",
     ),
     config_path: Path = typer.Option(Path("config.yaml"), "--config"),
     save_prompt: bool = typer.Option(
@@ -231,43 +250,29 @@ def test_panel(
     """Run the Stage1+Stage2 pipeline once: scenario → prompt (Claude) → image (Gemini)."""
     cfg = load_config(config_path)
 
-    raw = json.loads(scenario_path.read_text(encoding="utf-8"))
-    episode = ScenarioEpisode.model_validate(raw)
+    episode = ScenarioEpisode.model_validate_json(scenario_path.read_text(encoding="utf-8"))
     console.print(f"loaded scenario: [cyan]{episode.title}[/cyan] ({len(episode.panels)} panels)")
 
-    pack = ContentPack.from_dir(content_dir)
+    pack = ContentPack.from_dir(content_dir, content_cfg=cfg.content)
     console.print(f"loaded content pack from [cyan]{content_dir}[/cyan]")
 
-    claude = ClaudeClient(model=cfg.ai.scenario_model)
+    claude_key = _require_env(cfg.ai.scenario_api_key_env)
+    claude = ClaudeClient(model=cfg.ai.scenario_model, api_key=claude_key)
     console.print(f"asking [cyan]{cfg.ai.scenario_model}[/cyan] for image prompt…")
-    try:
+    with _fail_on("prompt generation failed"):
         image_prompt = build_image_prompt(episode=episode, pack=pack, claude=claude)
-    except Exception as e:
-        err_console.print(f"[red]✗ prompt generation failed:[/red] {e}")
-        sys.exit(1)
 
-    output.parent.mkdir(parents=True, exist_ok=True)
     if save_prompt:
         prompt_path = output.with_suffix(".prompt.txt")
+        prompt_path.parent.mkdir(parents=True, exist_ok=True)
         prompt_path.write_text(image_prompt, encoding="utf-8")
         console.print(f"  wrote prompt: [dim]{prompt_path}[/dim]")
 
-    gemini = GeminiImageClient(model=cfg.ai.image_model)
-    console.print(f"calling [cyan]{cfg.ai.image_model}[/cyan]…")
-    try:
-        result = gemini.generate_image(
-            prompt=image_prompt,
-            reference_images=refs or None,
-            aspect_ratio=cfg.ai.aspect_ratio,
-            image_size=cfg.ai.image_size,
-            max_attempts=cfg.ai.max_image_retries,
-        )
-    except Exception as e:
-        err_console.print(f"[red]✗ generation failed:[/red] {e}")
-        sys.exit(1)
-
+    result = _run_gemini(cfg, prompt=image_prompt, refs=refs)
     saved = _save_image(output, result.image_bytes, result.mime_type)
-    console.print(f"[green]✓ saved[/green] {saved} ({len(result.image_bytes)} bytes, {result.mime_type})")
+    console.print(
+        f"[green]✓ saved[/green] {saved} ({len(result.image_bytes)} bytes, {result.mime_type})"
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

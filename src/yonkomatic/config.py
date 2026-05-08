@@ -9,11 +9,16 @@ configuration objects stay free of secrets.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+
+ImageSize = Literal["512", "1K", "2K", "4K"]
+AspectRatio = Literal["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"]
+TextRenderMode = Literal["always", "fallback", "never"]
+BubbleStyle = Literal["round", "rectangle", "cloud"]
 
 
 class ContentConfig(BaseModel):
@@ -23,13 +28,27 @@ class ContentConfig(BaseModel):
     samples_dir: str = "samples"
     themes_dir: str = "themes"
 
+    def characters_path(self, base: Path | None = None) -> Path:
+        return (base or self.base_dir) / self.characters_dir
+
+    def world_path(self, base: Path | None = None) -> Path:
+        return (base or self.base_dir) / self.world_dir
+
+    def samples_path(self, base: Path | None = None) -> Path:
+        return (base or self.base_dir) / self.samples_dir
+
+    def themes_path(self, base: Path | None = None) -> Path:
+        return (base or self.base_dir) / self.themes_dir
+
 
 class AIConfig(BaseModel):
     scenario_model: str = "claude-sonnet-4-6"
     image_model: str = "gemini-3.1-flash-image-preview"
-    image_size: str = "1K"  # 開発デフォルトは 1K。本番運用では 2K を検討
-    aspect_ratio: str = "3:4"
+    image_size: ImageSize = "1K"
+    aspect_ratio: AspectRatio = "3:4"
     max_image_retries: int = 3
+    scenario_api_key_env: str = "ANTHROPIC_API_KEY"
+    image_api_key_env: str = "GOOGLE_AI_STUDIO_API_KEY"
 
 
 class SlackPublisherConfig(BaseModel):
@@ -71,9 +90,9 @@ class NewsConfig(BaseModel):
 
 
 class TextRenderingConfig(BaseModel):
-    mode: str = "fallback"  # always | fallback | never
+    mode: TextRenderMode = "fallback"
     font_path: Path = Path("./assets/fonts/NotoSansJP-Regular.otf")
-    bubble_style: str = "round"  # round | rectangle | cloud
+    bubble_style: BubbleStyle = "round"
 
 
 class Config(BaseModel):

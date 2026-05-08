@@ -1,11 +1,10 @@
 """Stage 1: turn a structured scenario into a single image prompt for Gemini.
 
 Claude is given the scenario JSON, the character settings, the world
-settings and the STYLE.md, and is asked to compose ONE long prompt that
-instructs Gemini to render all four panels stacked vertically (3:4
-aspect) as a single PNG. The dialogue text is included in the prompt so
-the model can attempt to render it; the PIL fallback (Step 3) covers
-cases where Gemini's Japanese typography is poor.
+settings and the STYLE.md, and is asked to compose ONE long English
+prompt that instructs Gemini to render all four panels stacked vertically
+(3:4 aspect) as a single image. Dialogue text is included in the prompt
+so the model can attempt to render it.
 """
 
 from __future__ import annotations
@@ -14,7 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from yonkomatic.ai.claude_client import ClaudeClient
-from yonkomatic.scenario.schema import ScenarioEpisode
+from yonkomatic.config import ContentConfig
+from yonkomatic.scenario.schema import Panel, ScenarioEpisode
 
 
 @dataclass
@@ -27,27 +27,52 @@ class ContentPack:
     theme_md: str | None = None
 
     @classmethod
-    def from_dir(cls, base: Path) -> ContentPack:
-        """Load required markdown from a content-style directory.
+    def from_dir(
+        cls,
+        base: Path,
+        content_cfg: ContentConfig | None = None,
+        *,
+        characters_filename: str = "settings.md",
+        world_filename: str = "settings.md",
+        style_filename: str = "STYLE.md",
+        theme_filename: str = "default.md",
+    ) -> ContentPack:
+        """Load required markdown using ContentConfig's subdir names.
 
-        Layout expected (matches ``examples/minimal/``)::
-
-            base/
-              characters/settings.md
-              world/settings.md
-              samples/STYLE.md
-              themes/default.md   (optional)
+        Filename defaults match ``examples/minimal/``; the per-domain subdir
+        names come from ``content_cfg`` so that customizing
+        ``config.yaml``'s ``content.*_dir`` keys flows through here.
         """
+        cfg = content_cfg or ContentConfig()
         return cls(
-            characters_md=(base / "characters" / "settings.md").read_text(encoding="utf-8"),
-            world_md=(base / "world" / "settings.md").read_text(encoding="utf-8"),
-            style_md=(base / "samples" / "STYLE.md").read_text(encoding="utf-8"),
-            theme_md=_read_optional(base / "themes" / "default.md"),
+            characters_md=(cfg.characters_path(base) / characters_filename).read_text(
+                encoding="utf-8"
+            ),
+            world_md=(cfg.world_path(base) / world_filename).read_text(encoding="utf-8"),
+            style_md=(cfg.samples_path(base) / style_filename).read_text(encoding="utf-8"),
+            theme_md=_read_optional(cfg.themes_path(base) / theme_filename),
         )
 
 
 def _read_optional(path: Path) -> str | None:
-    return path.read_text(encoding="utf-8") if path.exists() else None
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+
+
+def _format_panel(panel: Panel) -> str:
+    lines = [
+        f"Panel {panel.index}",
+        f"  description: {panel.description}",
+        f"  characters: {', '.join(panel.characters) or '(none)'}",
+    ]
+    if panel.dialogue:
+        lines.append("  dialogue:")
+        lines.extend(f'    - {d.speaker}: 「{d.text}」' for d in panel.dialogue)
+    else:
+        lines.append("  dialogue: (none)")
+    return "\n".join(lines)
 
 
 SYSTEM_PROMPT = """\
@@ -59,8 +84,7 @@ SYSTEM_PROMPT = """\
 要件:
 - 4 コマを縦に等しい高さで並べる構成。各コマの境界は細い黒線
 - 各パネルの構図、キャラクター配置、表情、背景を具体的に
-- 吹き出しは記載するが、テキスト描画が苦手な場合に備えて PIL でも上から
-  描けるようにシンプルな配置にする
+- 吹き出しは記載するが、後段で PIL で上書き合成できるようシンプルに配置
 - 画風は与えられた STYLE.md に厳密に従う
 - 出力は **プロンプト本文だけ**。前置きや解説は書かない
 """
@@ -73,14 +97,7 @@ def build_image_prompt(
     claude: ClaudeClient,
 ) -> str:
     """Ask Claude to assemble a single English prompt for Gemini."""
-    panels_block = "\n\n".join(
-        f"Panel {p.index}\n"
-        f"  description: {p.description}\n"
-        f"  characters: {', '.join(p.characters) or '(none)'}\n"
-        + ("  dialogue:\n" + "\n".join(f'    - {d.speaker}: 「{d.text}」' for d in p.dialogue)
-           if p.dialogue else "  dialogue: (none)")
-        for p in episode.panels
-    )
+    panels_block = "\n\n".join(_format_panel(p) for p in episode.panels)
 
     user = f"""\
 # シナリオ
