@@ -3,8 +3,10 @@
 Claude is given the scenario JSON, the character settings, the world
 settings and the STYLE.md, and is asked to compose ONE long English
 prompt that instructs Gemini to render all four panels stacked vertically
-(3:4 aspect) as a single image. Dialogue text is included in the prompt
-so the model can attempt to render it.
+(3:4 aspect) as a single image. Dialogue is passed as a *composition hint*
+only — Gemini is explicitly told NOT to draw bubbles or text, since the
+post-processing PIL overlay (``panel/composer.py``) handles Japanese
+rendering to avoid Gemini's hallucinated-kana failure mode.
 """
 
 from __future__ import annotations
@@ -68,7 +70,7 @@ def _format_panel(panel: Panel) -> str:
         f"  characters: {', '.join(panel.characters) or '(none)'}",
     ]
     if panel.dialogue:
-        lines.append("  dialogue:")
+        lines.append("  dialogue (do NOT render as text in the image; for composition hints only):")
         lines.extend(f'    - {d.speaker}: 「{d.text}」' for d in panel.dialogue)
     else:
         lines.append("  dialogue: (none)")
@@ -84,7 +86,15 @@ SYSTEM_PROMPT = """\
 要件:
 - 4 コマを縦に等しい高さで並べる構成。各コマの境界は細い黒線
 - 各パネルの構図、キャラクター配置、表情、背景を具体的に
-- 吹き出しは記載するが、後段で PIL で上書き合成できるようシンプルに配置
+- **吹き出しおよびテキストは画像内に一切描画させない**。各パネル内には
+  キャラクターの上部・横に吹き出しを後から重ねるための「空のスペース」
+  (壁・空・背景など、人物・小物のない領域) をはっきり残すこと。プロンプト
+  には英語で `absolutely no speech bubbles, no text, no captions, no letters
+  of any language (no hiragana, katakana, kanji, latin); leave empty space
+  above and to the side of each character so bubbles can be composited in
+  post-processing` のような指示を必ず含める
+- 表情・口の開き・視線・ポーズは dialogue (composition hints) を踏まえて
+  描写するが、台詞そのものを画像内に書かない
 - 画風は与えられた STYLE.md に厳密に従う
 - 出力は **プロンプト本文だけ**。前置きや解説は書かない
 """

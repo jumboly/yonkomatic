@@ -13,14 +13,18 @@ in ``examples/minimal/`` must validate against this schema.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
+
+DialogueKind = Literal["speech", "thought", "shout"]
 
 
 class Dialogue(BaseModel):
     speaker: str  # character key matching content/characters/settings.md (e.g. "yonko")
     text: str
+    # Default "speech" keeps pre-Step-5 scenario JSON files (no `kind` field) loadable.
+    kind: DialogueKind = "speech"
 
 
 class Panel(BaseModel):
