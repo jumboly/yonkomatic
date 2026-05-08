@@ -76,14 +76,14 @@
   - `generate-scenarios` で `cfg.news.enabled` かつ `--no-news` 未指定なら自動 fetch
   - `yonkomatic test news` 追加、`pyproject.toml` に `feedparser>=6.0`
   - 実フィードで 16 headlines → 2026-W20 を生成、SPEC 安全指針通り訃報・実在人物が直接反映されない確認
-- ✅ **Step 4c — GitHub Actions cron + `publish-today`** (このコミット)
+- ✅ **Step 4c — GitHub Actions cron + `publish-today`** (commit `4b76c68`)
   - `.github/workflows/weekly-scenarios.yml`: 日曜 14:00 UTC (= 23:00 JST) cron + `workflow_dispatch`、`TZ=Asia/Tokyo date -d '+1 day' +%G-W%V` で **翌週の ISO 週** を計算して `generate-scenarios --week ...`、scenarios/ を bot commit
   - `.github/workflows/daily-publish.yml`: 毎日 00:00 UTC (= 09:00 JST) cron、`publish-today` 後に state.json + docs/ + output/archive/ を bot commit
   - `yonkomatic publish-today [--date]` 新コマンド: pub_date から ISO 週を逆算 → scenarios/{week}.json をロード → state の `current_week_index`/`last_published_episode` から次 episode 番号を選択 (週またぎは 1 にリセット)
   - 既存 `publish` 関数の本体を `_publish_episode_pipeline()` ヘルパに切り出し、`publish` と `publish-today` で共有
   - ローカル `publish-today --dry-run` で `scenarios/2026-W19.json` から episode 2 が自動選択されパイプライン通過確認済み
   - 利用者ブランチで `.gitignore` の `/scenarios/` `/state/` `/output/` `/docs/*` を外す (or `git add -f` を使う) 必要あり — SETUP.md (Step 5) で記述予定
-- ✅ **Step 4d — エラー通知** (このコミット)
+- ✅ **Step 4d — エラー通知** (commit `83bd54b`)
   - `SlackPublisher.notify_failure(text) -> bool`: `chat_postMessage` を投げ、失敗は false (例外昇格させない)
   - `cli.py` に `_notify_failure(cfg, message)` ヘルパ。Slack publisher が `enabled` かつ token/channel 揃っているときだけ送信、それ以外は stderr ログのみ
   - `publish-today` の 3 つの障害ポイントで通知:
