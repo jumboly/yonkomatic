@@ -86,13 +86,21 @@ SYSTEM_PROMPT = """\
 要件:
 - 4 コマを縦に等しい高さで並べる構成。各コマの境界は細い黒線
 - 各パネルの構図、キャラクター配置、表情、背景を具体的に
-- **吹き出しおよびテキストは画像内に一切描画させない**。各パネル内には
-  キャラクターの上部・横に吹き出しを後から重ねるための「空のスペース」
-  (壁・空・背景など、人物・小物のない領域) をはっきり残すこと。プロンプト
-  には英語で `absolutely no speech bubbles, no text, no captions, no letters
-  of any language (no hiragana, katakana, kanji, latin); leave empty space
-  above and to the side of each character so bubbles can be composited in
-  post-processing` のような指示を必ず含める
+- **吹き出しおよびテキストは画像内に一切描画させない**。これは「文字を
+  入れない空の吹き出し」も含む — 空の楕円・雲形・角丸枠・ジグザグ枠
+  などマンガ的な吹き出し形状を画面内のどこにも置かせない。各パネル内
+  にはキャラクターの上部・横に吹き出しを後から重ねるための「空のスペ
+  ース」(壁・空・背景など、人物・小物のない領域) をはっきり残すこと。
+  プロンプトには英語で `absolutely no speech bubbles or balloons of any
+  kind — including empty, blank, or text-less ones; no white rounded
+  shapes, ovals, rectangles, clouds, or burst shapes overlaid on the
+  scene; no text, no captions, no letters in any language (no hiragana,
+  katakana, kanji, latin, romaji). The background must be naturalistic
+  only — sky, walls, foliage, plain interiors. Any white or light area
+  must be a real diegetic object (paper, cloth, sky, light, fog), not a
+  graphic overlay. Leave generous empty space above and to the side of
+  each character so bubbles can be composited in post-processing` の
+  ような指示を必ず含める
 - 表情・口の開き・視線・ポーズは dialogue (composition hints) を踏まえて
   描写するが、台詞そのものを画像内に書かない
 - 画風は与えられた STYLE.md に厳密に従う
