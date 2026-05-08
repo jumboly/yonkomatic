@@ -8,11 +8,11 @@
 
 ## 現在地
 
-- **完了**: Step 1, Step 2, Step 3, **Step 4 (4a/4b/4c/4d 全て)**
-- **次**: Step 5 (OSS 公開準備)
-- **ブロッカー**: なし
+- **完了**: Step 1, Step 2, Step 3, Step 4
+- **次**: Step 5 (日本語テキストオーバーレイ)
+- **ブロッカー**: Step 4 ライブ検証で Gemini が日本語の吹き出し文字を文字化けさせる問題が発覚 (例: 「うんこ」「マチカカおっちょっ〜」「そんこい？」「わんもおきっちーすん」)。Step 5 を OSS 公開準備の前に挟んで PIL オーバーレイを本実装する方針へ転換。
 
-最終更新: 2026-05-09 (Step 4 完了時)
+最終更新: 2026-05-09 (Step 5 ロードマップ化)
 
 ---
 
@@ -95,10 +95,41 @@
 
 完了条件: 1 週間放置して 7 話自動投稿できる。weekly/daily ワークフローのライブ運用は利用者ブランチで `workflow_dispatch` 手動 trigger → cron 観察で検証する。
 
-### ⏳ Step 5 — OSS 公開準備 (未着手)
+### ⏳ Step 5 — 日本語テキストオーバーレイ (composer fallback 本実装) (次)
+
+**背景**: Step 4 のライブ検証で `text_rendering.mode = never` (Gemini に直接日本語を描画させる) が **複数吹き出しのある画面で破綻** することが判明。Step 2 の単体テストでは 1K でも綺麗に描けたが、本番で生成した「朝のコーヒーと光の角度」(2026-W19 ep1) では吹き出し内に「うんこ」「マチカカおっちょっ〜」「そんこい？」「わんもおきっちーすん」「やってどうより聞かないけど〜」のような **意味不明な日本語の幻覚** が描かれた。Gemini 3.1 Flash Image は複数の吹き出しを画面内に配置するときに「日本語っぽい記号列」を出力する傾向がある。
+
+SPEC.md の元々の設計は PIL でテキストを後段オーバーレイする方針 (mode `fallback`/`always`)。Step 3 で composer.py をスタブ化したまま残していた本体を、ここで実装する。
+
+**完了条件**: scenarios/ の dialogue が画像内に **正確な日本語** で表示される (シナリオ JSON のテキストと一字一句一致)。
+
+**スコープ**:
+
+- `panel/description.py` の SYSTEM_PROMPT を変更: 「**吹き出しは描画しない**。台詞は後段で PIL オーバーレイするので、各キャラクターの上部・横に余白を残すこと」を Gemini に明示
+- `panel/composer.py` の `fallback` / `always` モードを本実装:
+  - 入力: Gemini の 4 コマ画像 + `ScenarioEpisode` (dialogue 込み)
+  - 出力: PIL で各 panel に吹き出し + 日本語テキストを描画した画像
+  - 4 panel を縦に等分割した上で、各 panel 内に dialogue を順序通り配置 (固定ロジック、画像解析なし)
+  - 吹き出し位置: 1 dialogue は上部中央、2 dialogue は左上 + 右下、3+ は均等配置
+  - `bubble_style` は `round` (楕円・通常台詞) / `rectangle` (内心モノローグはなし → 雲形と統合) / `cloud` (雲形・モノローグ) / 叫びはジグザグ枠 (ScenarioEpisode に kind タグがないので一旦 round 一択でもよい)
+  - `fallback` = Gemini 出力に既に文字が描かれているとき上書き、`always` = 常に PIL 描画 (実質同じ)
+- `scripts/install_fonts.py` (既存) を本番でも使う:
+  - ローカル: `uv run python scripts/install_fonts.py` を README に書く
+  - GitHub Actions: `daily-publish.yml` にフォント install ステップ追加 + actions/cache でフォントを cache (毎回 download しない)
+- `config.yaml` の `text_rendering.mode` デフォルトを `never` → `always` に変更
+- 動作確認: live ブランチで `publish-today --dry-run` → 生成画像を目視で確認 (シナリオ JSON の dialogue と画像内テキストが一致)
+
+サブステップ予定 (commit は分けるが `/simplify` は Step 5 全体完了後 1 回):
+
+- 5a. Gemini プロンプト変更 (`panel/description.py`) + 1K 単話テストで「吹き出しは空白」になるか確認
+- 5b. `panel/composer.py` の PIL オーバーレイ本実装 + ローカル単話テスト
+- 5c. config.yaml デフォルト `mode: always` 切り替え + GitHub Actions のフォント install + cache
+- 5d. live ブランチで実 cron / workflow_dispatch 検証
+
+### ⏳ Step 6 — OSS 公開準備 (旧 Step 5)
 
 - README に Quick Start + デモ画像
-- SETUP.md を fork / branch 戦略まで含めて拡充
+- SETUP.md を fork / branch 戦略まで含めて拡充 (`.gitignore` 緩和、Default branch = live、Secrets、Workflow permissions の手順)
 - ユニットテスト (API はモック)
 - GitHub Template Repository 設定
 - LICENSE / CONTRIBUTING.md
@@ -112,6 +143,8 @@
 
 新しい決定が出たら頭に追加。古いものは削除せず残す。
 
+- **2026-05-09 (撤回・再判断)** `text_rendering.mode = never` (Gemini に日本語を直接描かせる) を Step 2-4 で採用していたが、Step 4 ライブ検証で **複数吹き出しの画面で文字化け** することが判明。Step 5 で composer.py の `fallback`/`always` を本実装 + デフォルトを `always` に変更する。Step 2 の単体テストは 1 吹き出しのみだったため検出できなかった。1K → 2K の解像度上げでも保証できないので、PIL でテキスト合成する SPEC 元々の設計に戻す。
+- **2026-05-09** Step 5 として「composer fallback 本実装」を OSS 公開準備の **前に** 挟む。日本語が読めない 4 コマを公開するわけにはいかないため。旧 Step 5 (OSS 公開準備) は Step 6 に番号繰り下げ。
 - **2026-05-09** エラー通知は **既存 SlackPublisher を流用**して `notify_failure` メソッドを生やす方針 (新モジュールは作らない)。Discord 通知は Step 5 以降。Slack publisher が disabled / 認証情報未設定の場合は stderr ログにフォールバック。
 - **2026-05-09** `publish-today` は `_publish_episode_pipeline` を `try: ... except typer.Exit` でラップして cron-level コンテキスト (date / episode / week / title) を含めた通知メッセージを送る。pipeline 内部のエラーメッセージはそのまま console に流し、通知は要約だけにする (Slack の表示が短い + GHA log で詳細は追えるため)。
 - **2026-05-09** weekly-scenarios cron は「翌週」を生成する。日曜 23:00 JST は ISO 週の最終時間で、その時点の `isocalendar()` はまだ今週を返すため、`TZ=Asia/Tokyo date -d '+1 day'` で次週を明示計算。daily-publish 側は `--date` (デフォルト today) → `_iso_week_of(...)` で逆算するので「月曜から正しく新シナリオを引く」フローが両側で整合する。
@@ -162,6 +195,13 @@
 - `summary_no_spoiler` がオチを匂わせる問題の SYSTEM_PROMPT 強化 (例: 2026-W19 ep7「マチカの行動が鍵だった」)
 - 過去 2〜4 週分の `summary_no_spoiler` を generator に渡してネタ被り (朝のコーヒー / 新緑散歩 / そら豆など) を避ける
 - 連続生成された複数週シナリオを比較して重複度を機械的にチェックする lint コマンド
+
+### テキストオーバーレイの将来課題 (Step 5 完了後)
+
+- 吹き出し位置の自動検出 (Gemini が描いたフキダシ的空白領域を OpenCV / PIL で検出して PIL 配置と一致させる)
+- 吹き出し種別の `ScenarioEpisode.Dialogue` への追加 (`kind: "speech" | "thought" | "shout"` で `bubble_style` を切り替え)
+- フォントサイズの動的調整 (台詞の長さで縮小)
+- 縦書きオプション
 
 ### 投稿先プラットフォーム拡張
 
