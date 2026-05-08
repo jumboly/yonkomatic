@@ -39,7 +39,7 @@
 - 開発デフォルト: `image_size: "1K"` (本番品質確認時に 2K へ)
 - end-to-end 実 API で 4 コマ漫画生成成功 (`output/test-panel.jpg`)
 
-### ✅ Step 3 — E2E パイプライン + マルチパブリッシュ (commit 未追記)
+### ✅ Step 3 — E2E パイプライン + マルチパブリッシュ (commit `1eff27f`)
 
 スコープを軽量化した E2E パイプラインを実装。完了条件「1 コマンドでシナリオ → 画像 → 複数プラットフォーム同時投稿」を Slack + static_site の 2 系統で達成。
 
