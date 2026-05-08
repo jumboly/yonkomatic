@@ -48,9 +48,10 @@ news:
   language: ja
 
 text_rendering:
-  # never: Gemini の出力をそのまま使う (PIL オーバーレイなし)。fallback/always は
-  # 日本語フォント (Noto Sans JP) と PIL 描画を要求するため未配布の素のリポジトリで
-  # は動かない。opt-in した場合は composer.py が NotImplementedError を投げる。
-  mode: never # always | fallback | never
+  # always: PIL で日本語吹き出しをオーバーレイ (Step 5 で本実装)。Gemini は
+  # 複数吹き出しの画面で日本語を文字化けさせるため、後段で PIL 合成する。
+  # 利用前に `uv run python scripts/install_fonts.py` で Noto Sans JP を取得。
+  # never に切替えると PIL オーバーレイをスキップ (Gemini 出力をそのまま使う)。
+  mode: always # always | fallback | never
   font_path: ./assets/fonts/NotoSansJP-Regular.otf
-  bubble_style: round # round | rectangle | cloud
+  bubble_style: round # round | rectangle | cloud (kind="speech" のみに適用)

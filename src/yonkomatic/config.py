@@ -90,10 +90,12 @@ class NewsConfig(BaseModel):
 
 
 class TextRenderingConfig(BaseModel):
-    # Why "never" default: 1K Gemini renders Japanese well enough that PIL
-    # overlay is not needed; falling back to PIL also requires Noto Sans JP
-    # to be present, which the bare template repo does not ship.
-    mode: TextRenderMode = "never"
+    # Why "always" default: Gemini hallucinates Japanese characters when
+    # asked to render multiple speech bubbles in one image, so we instruct
+    # Gemini to skip text and composite Japanese with PIL afterwards. Users
+    # must run scripts/install_fonts.py once (or rely on the workflow cache)
+    # to provide Noto Sans JP.
+    mode: TextRenderMode = "always"
     font_path: Path = Path("./assets/fonts/NotoSansJP-Regular.otf")
     bubble_style: BubbleStyle = "round"
 
