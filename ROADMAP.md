@@ -157,6 +157,12 @@
 - キャラドリフト検出 (埋め込みベクトル類似度)
 - シード固定オプション
 
+### シナリオ生成・品質改善 (Step 4 レビューで判明)
+
+- `summary_no_spoiler` がオチを匂わせる問題の SYSTEM_PROMPT 強化 (例: 2026-W19 ep7「マチカの行動が鍵だった」)
+- 過去 2〜4 週分の `summary_no_spoiler` を generator に渡してネタ被り (朝のコーヒー / 新緑散歩 / そら豆など) を避ける
+- 連続生成された複数週シナリオを比較して重複度を機械的にチェックする lint コマンド
+
 ### 投稿先プラットフォーム拡張
 
 - Bluesky / Telegram / Misskey / Mastodon / X / Threads / LINE / Microsoft Teams / 汎用 Webhook
