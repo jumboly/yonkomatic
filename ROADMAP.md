@@ -8,11 +8,11 @@
 
 ## 現在地
 
-- **完了**: Step 1, Step 2, Step 3, **Step 4a (scenario generator)**
-- **次**: Step 4b (news/fetcher.py 統合)
+- **完了**: Step 1, Step 2, Step 3, Step 4a, **Step 4b (news fetcher)**
+- **次**: Step 4c (GitHub Actions cron + publish-today)
 - **ブロッカー**: なし
 
-最終更新: 2026-05-09 (Step 4a 完了時)
+最終更新: 2026-05-09 (Step 4b 完了時)
 
 ---
 
@@ -63,14 +63,19 @@
 
 サブステップ単位で commit する方針。
 
-- ✅ **Step 4a — `scenario/generator.py` + `generate-scenarios` CLI** (このコミット)
-  - `scenario/generator.py`: `generate_week(claude, pack, week, news_headlines=None) -> ScenarioWeek` (1 コール 7 話一括、temperature=0.8、max_tokens=8192)
+- ✅ **Step 4a — `scenario/generator.py` + `generate-scenarios` CLI** (commit `76e8061`)
+  - `scenario/generator.py`: `generate_week(claude, pack, week, news_headlines=None) -> ScenarioWeek` (1 コール 7 話一括、`_TEMPERATURE=0.8` / `_MAX_TOKENS=8192`)
   - 応答パース: ``` フェンス → ブレース平衡スキャンの 2 段で前置き混入に耐性
-  - `yonkomatic generate-scenarios [--week] [--out] [--no-news] [--force]` を追加
+  - `yonkomatic generate-scenarios [--week] [--out] [--no-news] [--force]`
   - `--week` 省略時は今日含む ISO 週を自動算出
-  - テーマファイル解決: `themes/{YYYY-MM}.md` 優先、なければ `default.md` (SPEC L125 と既存 publish の食い違いを generate 側で吸収)
-  - 実 API で 2026-W19 の 7 話生成 → episode 1 を `publish --dry-run` に流して Step 3 パイプラインまで通る確認済み
-- ⏳ **Step 4b** — `news/fetcher.py` (feedparser で RSS)、`generate-scenarios` の自動 fetch 統合、`yonkomatic test news`
+  - テーマ解決: `themes/{YYYY-MM}.md` 優先 → `default.md` フォールバック
+  - 実 API で 2026-W19 の 7 話生成 → `publish --dry-run` で Step 3 パイプラインまで通る確認済み
+- ✅ **Step 4b — `news/fetcher.py` 統合** (このコミット)
+  - `news/fetcher.py`: `fetch_recent_headlines(news_cfg) -> list[str]`、feedparser で feed 単位の例外を吸収 (Publisher と同じ独立性)
+  - `generate-scenarios` で `cfg.news.enabled` かつ `--no-news` 未指定なら自動 fetch
+  - `yonkomatic test news` で件数 + 先頭 10 件をプリント (動作確認用)
+  - `pyproject.toml` に `feedparser>=6.0` 追加
+  - 実フィード (Yahoo entertainment + sports) で 16 headlines 取得 → 2026-W20 シナリオ生成、SPEC の安全指針通り訃報・実在人物が直接反映されないことを確認
 - ⏳ **Step 4c** — `.github/workflows/weekly-scenarios.yml` (日曜 23:00 JST) + `daily-publish.yml` (毎日 9:00 JST)、`yonkomatic publish-today` (state から episode 自動選択)
 - ⏳ **Step 4d** — `SlackPublisher.notify_failure()` + `publish-today` の障害通知挿入
 
@@ -93,6 +98,7 @@
 
 新しい決定が出たら頭に追加。古いものは削除せず残す。
 
+- **2026-05-09** news fetcher は **feed 単位で例外吸収**して空 list を返す方針。Publisher の独立性 (1 つの障害が全体を倒さない) と同じ思想で、ニュース取得失敗はシナリオ生成を止めない。
 - **2026-05-09** Step 4 はサブステップ 4a/4b/4c/4d で commit を分ける。各完了時に `/simplify` レビュー + ROADMAP 更新 + ユーザーレビュー依頼。
 - **2026-05-09** 週次シナリオ生成は **毎回 Claude を叩く**。`scenarios/{week}.json` は `--force` がない限り上書きしない (誤って上書きすると過去アーカイブとの整合が壊れるため)。
 - **2026-05-09** `generate-scenarios` は月別テーマ (`themes/{YYYY-MM}.md`) があれば優先、なければ既存 `default.md` にフォールバック。SPEC.md L125 の月別仕様と既存 `panel/description.py` の `default.md` 既定を generator 側でブリッジ。`publish` (Step 3) の挙動は据え置き。

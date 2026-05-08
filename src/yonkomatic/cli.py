@@ -24,6 +24,7 @@ from yonkomatic import __version__
 from yonkomatic.ai.claude_client import ClaudeClient
 from yonkomatic.ai.gemini_client import GeminiImageClient, GeminiImageResult
 from yonkomatic.config import Config, load_config
+from yonkomatic.news.fetcher import fetch_recent_headlines
 from yonkomatic.panel.composer import compose
 from yonkomatic.panel.description import ContentPack, build_image_prompt
 from yonkomatic.panel.validator import ValidationResult, validate
@@ -223,6 +224,29 @@ def test_gemini(
     console.print(
         f"[green]✓ saved[/green] {saved} ({len(result.image_bytes)} bytes, {result.mime_type})"
     )
+
+
+@test_app.command("news")
+def test_news(
+    config_path: Path = typer.Option(Path("config.yaml"), "--config"),
+) -> None:
+    """Fetch RSS feeds and print recent headlines (smoke test for news fetcher)."""
+    cfg = load_config(config_path)
+    if not cfg.news.enabled or not cfg.news.feeds:
+        console.print(
+            "[yellow]news disabled or feeds empty in config; nothing to fetch.[/yellow]"
+        )
+        return
+
+    headlines = fetch_recent_headlines(cfg.news)
+    console.print(
+        f"[green]✓[/green] {len(headlines)} headlines from {len(cfg.news.feeds)} feed(s) "
+        f"(lookback {cfg.news.lookback_days}d, max {cfg.news.max_items_per_feed}/feed)"
+    )
+    for h in headlines[:10]:
+        console.print(f"  - {h}")
+    if len(headlines) > 10:
+        console.print(f"  [dim]... ({len(headlines) - 10} more)[/dim]")
 
 
 @test_app.command("panel")
@@ -604,6 +628,12 @@ def generate_scenarios(
     headlines: list[str] = []
     if no_news or not cfg.news.enabled:
         console.print("[dim]news fetch skipped[/dim]")
+    else:
+        headlines = fetch_recent_headlines(cfg.news)
+        console.print(
+            f"  collected [cyan]{len(headlines)}[/cyan] headlines "
+            f"from {len(cfg.news.feeds)} feed(s)"
+        )
 
     console.print(
         f"asking [cyan]{cfg.ai.scenario_model}[/cyan] for 7 episodes "
