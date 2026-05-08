@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## まず読むもの
 
-1. **`docs/ROADMAP.md`** — ライブステータス。現在地、次の Step、直近の決定事項、既知の挙動 (gotchas)、バックログ。**作業を始める前に必ず読む**。
-2. **`docs/SPEC.md`** — 設計仕様書 (引き継ぎ全文)。ROADMAP.md で書かれていない設計判断の根拠が欲しいときに参照。
+1. **`ROADMAP.md`** — ライブステータス。現在地、次の Step、直近の決定事項、既知の挙動 (gotchas)、バックログ。**作業を始める前に必ず読む**。
+2. **`SPEC.md`** — 設計仕様書 (引き継ぎ全文)。ROADMAP.md で書かれていない設計判断の根拠が欲しいときに参照。
 
-Step 完了 / 重要決定 / 新たなハマりポイントを発見したら、同じセッション内で `docs/ROADMAP.md` を更新してからコミットする。情報の単一ソース。
+Step 完了 / 重要決定 / 新たなハマりポイントを発見したら、同じセッション内で `ROADMAP.md` を更新してからコミットする。情報の単一ソース。
 
 ## 開発コマンド
 

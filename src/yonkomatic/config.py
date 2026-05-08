@@ -90,7 +90,10 @@ class NewsConfig(BaseModel):
 
 
 class TextRenderingConfig(BaseModel):
-    mode: TextRenderMode = "fallback"
+    # Why "never" default: 1K Gemini renders Japanese well enough that PIL
+    # overlay is not needed; falling back to PIL also requires Noto Sans JP
+    # to be present, which the bare template repo does not ship.
+    mode: TextRenderMode = "never"
     font_path: Path = Path("./assets/fonts/NotoSansJP-Regular.otf")
     bubble_style: BubbleStyle = "round"
 

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>yonkomatic</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <h1>yonkomatic</h1>
+    <p>毎日 1 本、AI 生成の 4 コマ漫画。</p>
+  </header>
+  <main class="archive">
+    {% if entries %}
+    <ul class="entries">
+      {% for entry in entries %}
+      <li class="entry">
+        <a href="posts/{{ entry.date }}.html">
+          <img src="images/{{ entry.image_filename }}" alt="{{ entry.title }}">
+          <div class="entry-meta">
+            <span class="entry-date">{{ entry.date }}</span>
+            <h2>第{{ entry.episode_number }}話: {{ entry.title }}</h2>
+            <p>{{ entry.summary_no_spoiler }}</p>
+          </div>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">まだエピソードはありません。</p>
+    {% endif %}
+  </main>
+</body>
+</html>

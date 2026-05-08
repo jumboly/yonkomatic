@@ -39,12 +39,14 @@ Thumbs.db
 /output/
 /state/
 
+# Generated static site under docs/ (Pages publishes from /docs).
+# Doc files at the repo root (ROADMAP.md / SPEC.md) are not affected.
+/docs/index.html
+/docs/posts/
+/docs/images/
+/docs/css/
+/docs/.posts-index.json
+
 # Downloaded fonts (OFL-1.1) — fetched by scripts/install_fonts.py
 assets/fonts/*.otf
 assets/fonts/*.ttf
-
-# Generated static site output (Step 3+)
-docs/images/
-docs/posts/
-docs/feed.xml
-docs/index.html

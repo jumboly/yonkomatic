@@ -18,7 +18,7 @@ class Episode:
     number: int
     title: str
     summary_no_spoiler: str
-    week: str  # ISO week, e.g. "2026-W19"
+    week: str | None  # ISO week, e.g. "2026-W19"; None when the scenario lacks one
     date: str  # ISO date, e.g. "2026-05-09"
 
 

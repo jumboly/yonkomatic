@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import mimetypes
 import os
 import tempfile
 import uuid
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import date as _date
+from datetime import datetime
 from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
 
 import typer
 from PIL import Image, ImageDraw, ImageFont
@@ -19,10 +24,14 @@ from yonkomatic import __version__
 from yonkomatic.ai.claude_client import ClaudeClient
 from yonkomatic.ai.gemini_client import GeminiImageClient, GeminiImageResult
 from yonkomatic.config import Config, load_config
+from yonkomatic.panel.composer import compose
 from yonkomatic.panel.description import ContentPack, build_image_prompt
-from yonkomatic.publisher.base import Episode
+from yonkomatic.panel.validator import ValidationResult, validate
+from yonkomatic.publisher.base import Episode, Publisher, PublishResult
 from yonkomatic.publisher.slack import SlackPublisher
+from yonkomatic.publisher.static_site import StaticSitePublisher
 from yonkomatic.scenario.schema import ScenarioEpisode
+from yonkomatic.state.repo import HistoryEntry, StateStore
 
 app = typer.Typer(
     name="yonkomatic",
@@ -273,6 +282,255 @@ def test_panel(
     console.print(
         f"[green]✓ saved[/green] {saved} ({len(result.image_bytes)} bytes, {result.mime_type})"
     )
+
+
+def _today_in_configured_tz(cfg: Config) -> str:
+    return datetime.now(ZoneInfo(cfg.schedule.timezone)).date().isoformat()
+
+
+def _build_publishers(cfg: Config) -> list[Publisher]:
+    """Instantiate every enabled publisher; secrets are read from os.environ here."""
+    publishers: list[Publisher] = []
+
+    if cfg.publishers.slack.enabled:
+        token = _require_env(cfg.publishers.slack.token_env)
+        channel = _require_env(cfg.publishers.slack.channel_env)
+        publishers.append(SlackPublisher(token=token, channel=channel))
+
+    if cfg.publishers.static_site.enabled:
+        publishers.append(
+            StaticSitePublisher(
+                output_dir=cfg.publishers.static_site.output_dir,
+                base_url=cfg.publishers.static_site.base_url,
+            )
+        )
+
+    if cfg.publishers.discord.enabled:
+        # Why warn rather than fail: a user who left discord.enabled: true
+        # should know it's a no-op without aborting the rest of the run.
+        err_console.print(
+            "[yellow]warning:[/yellow] discord publisher is enabled in config but "
+            "not implemented yet — skipping."
+        )
+
+    return publishers
+
+
+def _run_publishers(
+    publishers: list[Publisher],
+    episode: Episode,
+    image_path: Path,
+) -> list[PublishResult]:
+    if not publishers:
+        return []
+    with ThreadPoolExecutor(max_workers=len(publishers)) as ex:
+        futures = {ex.submit(pub.publish, episode, image_path): pub.name for pub in publishers}
+        results: list[PublishResult] = []
+        for fut in as_completed(futures):
+            name = futures[fut]
+            try:
+                results.append(fut.result())
+            except Exception as e:
+                # Why catch: Publisher protocol forbids raising, but we
+                # double-guard so one buggy publisher cannot kill the run.
+                results.append(PublishResult(ok=False, publisher=name, error=str(e)))
+    return results
+
+
+def _print_publish_results(results: list[PublishResult]) -> None:
+    for r in results:
+        if r.ok:
+            extra = f" → {r.url}" if r.url else ""
+            console.print(f"[green]✓[/green] [cyan]{r.publisher}[/cyan]: posted{extra}")
+        else:
+            err_console.print(f"[red]✗[/red] [cyan]{r.publisher}[/cyan]: {r.error}")
+
+
+def _result_to_meta(r: PublishResult) -> dict[str, Any]:
+    return {"ok": r.ok, "artifact_id": r.artifact_id, "url": r.url, "error": r.error}
+
+
+def _write_archive(
+    *,
+    archive_dir: Path,
+    date: str,
+    image_bytes: bytes,
+    mime_type: str,
+    episode: ScenarioEpisode,
+    prompt: str,
+    cfg: Config,
+    validation: ValidationResult,
+) -> tuple[Path, Path]:
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    image_path = _save_image(archive_dir / f"{date}.png", image_bytes, mime_type)
+    meta_path = archive_dir / f"{date}.json"
+    meta = {
+        "date": date,
+        "episode_number": episode.episode_number,
+        "week": episode.week,
+        "title": episode.title,
+        "summary_no_spoiler": episode.summary_no_spoiler,
+        "image_prompt": prompt,
+        "ai": {
+            "scenario_model": cfg.ai.scenario_model,
+            "image_model": cfg.ai.image_model,
+            "image_size": cfg.ai.image_size,
+            "aspect_ratio": cfg.ai.aspect_ratio,
+        },
+        "image": {"mime_type": mime_type, "size_bytes": len(image_bytes)},
+        "text_rendering_mode": cfg.text_rendering.mode,
+        "validation": {
+            "ok": validation.ok,
+            "score": validation.score,
+            "reason": validation.reason,
+        },
+    }
+    meta_path.write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return image_path, meta_path
+
+
+@app.command()
+def publish(
+    scenario_file: Path = typer.Option(
+        ...,
+        "--scenario-file",
+        "-s",
+        help="Path to a scenario JSON file (single ScenarioEpisode).",
+    ),
+    date_str: str | None = typer.Option(
+        None,
+        "--date",
+        help="ISO date YYYY-MM-DD. Defaults to today in config schedule.timezone.",
+    ),
+    content_dir: Path = typer.Option(
+        Path("examples/minimal"),
+        "--content",
+        help="Directory holding characters/, world/, samples/, themes/.",
+    ),
+    refs: list[Path] = typer.Option(
+        [],
+        "--refs",
+        "-r",
+        help="Optional character / style reference images.",
+    ),
+    config_path: Path = typer.Option(Path("config.yaml"), "--config"),
+    state_path: Path = typer.Option(
+        Path("state/state.json"),
+        "--state",
+        help="Path to state.json. Updated on success unless --dry-run.",
+    ),
+    archive_dir: Path = typer.Option(
+        Path("output/archive"),
+        "--archive-dir",
+        help="Where {date}.png and {date}.json are written for reproducibility.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Generate image and write archive, but skip publishers and state update.",
+    ),
+) -> None:
+    """Run the full pipeline: scenario → image → multi-publish + archive."""
+    cfg = load_config(config_path)
+
+    with _fail_on("load scenario"):
+        episode_data = ScenarioEpisode.model_validate_json(
+            scenario_file.read_text(encoding="utf-8")
+        )
+
+    pub_date = date_str or _today_in_configured_tz(cfg)
+    console.print(
+        f"publishing for [cyan]{pub_date}[/cyan]: 「{episode_data.title}」 "
+        f"(episode {episode_data.episode_number})"
+    )
+
+    with _fail_on("load content pack"):
+        pack = ContentPack.from_dir(content_dir, content_cfg=cfg.content)
+
+    claude_key = _require_env(cfg.ai.scenario_api_key_env)
+    claude = ClaudeClient(model=cfg.ai.scenario_model, api_key=claude_key)
+    console.print(f"asking [cyan]{cfg.ai.scenario_model}[/cyan] for image prompt…")
+    with _fail_on("prompt generation failed"):
+        image_prompt = build_image_prompt(episode=episode_data, pack=pack, claude=claude)
+
+    gemini_result = _run_gemini(cfg, prompt=image_prompt, refs=refs)
+
+    with _fail_on("compose"):
+        final_bytes = compose(
+            image_bytes=gemini_result.image_bytes,
+            episode=episode_data,
+            mode=cfg.text_rendering.mode,
+            font_path=cfg.text_rendering.font_path,
+        )
+
+    validation = validate(image_bytes=final_bytes, episode=episode_data)
+    if not validation.ok:
+        err_console.print(f"[red]✗ validation failed:[/red] {validation.reason}")
+        raise typer.Exit(code=1)
+
+    archive_image, archive_meta = _write_archive(
+        archive_dir=archive_dir,
+        date=pub_date,
+        image_bytes=final_bytes,
+        mime_type=gemini_result.mime_type,
+        episode=episode_data,
+        prompt=image_prompt,
+        cfg=cfg,
+        validation=validation,
+    )
+    console.print(f"  archive image: [dim]{archive_image}[/dim]")
+    console.print(f"  archive meta:  [dim]{archive_meta}[/dim]")
+
+    episode_obj = Episode(
+        number=episode_data.episode_number,
+        title=episode_data.title,
+        summary_no_spoiler=episode_data.summary_no_spoiler,
+        week=episode_data.week,
+        date=pub_date,
+    )
+
+    publishers = _build_publishers(cfg)
+    if not publishers:
+        err_console.print(
+            "[yellow]warning:[/yellow] no publishers are enabled in config.yaml"
+        )
+
+    if dry_run:
+        for pub in publishers:
+            console.print(f"[dim]·[/dim] [cyan]{pub.name}[/cyan]: dry-run (no post)")
+        console.print("[green]✓ dry-run complete[/green]")
+        return
+
+    results = _run_publishers(publishers, episode_obj, archive_image)
+    _print_publish_results(results)
+
+    if not publishers:
+        err_console.print(
+            "[yellow]no publishers were configured; state not updated.[/yellow]"
+        )
+        return
+
+    # Why all-failure short-circuits state: leaving state untouched lets
+    # CI retry tomorrow without burning the episode_number, and signals
+    # the failure with a non-zero exit. Partial success still updates
+    # state so successful platforms are not reposted on retry.
+    if not any(r.ok for r in results):
+        err_console.print("[red]✗ all publishers failed; state not updated.[/red]")
+        raise typer.Exit(code=1)
+
+    state = StateStore(state_path)
+    entry = HistoryEntry(
+        episode_number=episode_data.episode_number,
+        week=episode_data.week,
+        date=pub_date,
+        title=episode_data.title,
+        archive_path=str(archive_image),
+        publishers={r.publisher: _result_to_meta(r) for r in results},
+    )
+    state.append(entry)
+    console.print(f"  state updated: [dim]{state_path}[/dim]")
 
 
 if __name__ == "__main__":  # pragma: no cover

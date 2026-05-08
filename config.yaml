@@ -11,8 +11,8 @@ ai:
   scenario_model: claude-sonnet-4-6
   image_model: gemini-3.1-flash-image-preview
   # 開発・テスト時は 1K 推奨 (生成が速く安価)。本番運用で品質が必要になったら 2K へ。
-  image_size: "1K"                 # 512 | 1K | 2K | 4K
-  aspect_ratio: "3:4"              # 縦長4コマ
+  image_size: "1K" # 512 | 1K | 2K | 4K
+  aspect_ratio: "3:4" # 縦長4コマ
   max_image_retries: 3
 
 publishers:
@@ -24,9 +24,12 @@ publishers:
     enabled: false
     webhook_env: DISCORD_WEBHOOK_URL
   static_site:
-    enabled: false
+    enabled: true
+    # GitHub Pages の "Deploy from a branch" は Source として /(root) か /docs しか
+    # 選べないため、docs/ を出力先にする。リポジトリのドキュメント類はルート直下
+    # (ROADMAP.md / SPEC.md / README.md / CLAUDE.md) に置いて干渉を避ける。
     output_dir: ./docs
-    base_url: ""                   # GitHub Pages 等の公開URL
+    base_url: "" # GitHub Pages 等の公開URL
 
 schedule:
   timezone: Asia/Tokyo
@@ -45,6 +48,9 @@ news:
   language: ja
 
 text_rendering:
-  mode: fallback                   # always | fallback | never
+  # never: Gemini の出力をそのまま使う (PIL オーバーレイなし)。fallback/always は
+  # 日本語フォント (Noto Sans JP) と PIL 描画を要求するため未配布の素のリポジトリで
+  # は動かない。opt-in した場合は composer.py が NotImplementedError を投げる。
+  mode: never # always | fallback | never
   font_path: ./assets/fonts/NotoSansJP-Regular.otf
-  bubble_style: round              # round | rectangle | cloud
+  bubble_style: round # round | rectangle | cloud
