@@ -4,7 +4,8 @@
 
 AI が毎日 4 コマ漫画を描き、Slack / Discord / 静的サイトへ自動投稿する OSS テンプレート。
 
-> **Status:** 🚧 Step 1 (土台 + Slack 疎通) 実装中。詳細仕様は [`docs/SPEC.md`](docs/SPEC.md) を参照してください。
+> **Status:** 🚧 Step 2 完了、Step 3 (E2E パイプライン + マルチパブリッシュ) 着手前。
+> 進捗は [`docs/ROADMAP.md`](docs/ROADMAP.md)、設計仕様は [`docs/SPEC.md`](docs/SPEC.md) を参照。
 
 ## このリポジトリの位置付け
 
