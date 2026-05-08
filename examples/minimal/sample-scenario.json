@@ -1,0 +1,42 @@
+{
+  "$schema_note": "Provisional schema — finalized in Step 2 alongside scenario/schema.py.",
+  "week": "2026-W19",
+  "episode_number": 1,
+  "title": "ベランダの初夏",
+  "summary_no_spoiler": "ヨンコがベランダで小さな発見をする",
+  "panels": [
+    {
+      "index": 1,
+      "description": "ヨンコがベランダの手すりに肘をついて、外を眺めている。風が前髪を揺らす。",
+      "characters": ["yonko"],
+      "dialogue": [
+        {"speaker": "yonko", "text": "風、ぬるくなってきた"}
+      ]
+    },
+    {
+      "index": 2,
+      "description": "ヨンコの視線の先に、隣のベランダで干されている洗濯物が見える。シャツが揺れている。",
+      "characters": ["yonko"],
+      "dialogue": [
+        {"speaker": "yonko", "text": "あ、もう半袖の季節だ"}
+      ]
+    },
+    {
+      "index": 3,
+      "description": "玄関の方からマチカが顔を出して、ヨンコに声をかける。",
+      "characters": ["yonko", "machika"],
+      "dialogue": [
+        {"speaker": "machika", "text": "ヨンコー、アイス買ってきたー!"}
+      ]
+    },
+    {
+      "index": 4,
+      "description": "ヨンコがベランダから振り返り、少し笑う。アイスの袋を持ったマチカ。",
+      "characters": ["yonko", "machika"],
+      "dialogue": [
+        {"speaker": "yonko", "text": "気が早すぎ"},
+        {"speaker": "machika", "text": "暑いから合ってる!"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+# yonkomatic のデフォルト設定。利用者は自分のブランチで上書きする。
+
+content:
+  base_dir: ./content
+  characters_dir: characters
+  world_dir: world
+  samples_dir: samples
+  themes_dir: themes
+
+ai:
+  scenario_model: claude-sonnet-4-6
+  image_model: gemini-3.1-flash-image-preview
+  image_size: "2K"                 # 512 | 1K | 2K | 4K
+  aspect_ratio: "3:4"              # 縦長4コマ
+  max_image_retries: 3
+
+publishers:
+  slack:
+    enabled: true
+    channel_env: SLACK_CHANNEL_ID
+    token_env: SLACK_BOT_TOKEN
+  discord:
+    enabled: false
+    webhook_env: DISCORD_WEBHOOK_URL
+  static_site:
+    enabled: false
+    output_dir: ./docs
+    base_url: ""                   # GitHub Pages 等の公開URL
+
+schedule:
+  timezone: Asia/Tokyo
+  publish_time: "09:00"
+  scenario_generation_dow: sunday
+  scenario_generation_time: "23:00"
+
+news:
+  enabled: true
+  feeds:
+    # デフォルトは時事色の薄い軽量フィード。利用者が差し替え可能。
+    - https://news.yahoo.co.jp/rss/topics/entertainment.xml
+    - https://news.yahoo.co.jp/rss/topics/sports.xml
+  max_items_per_feed: 10
+  lookback_days: 7
+  language: ja
+
+text_rendering:
+  mode: fallback                   # always | fallback | never
+  font_path: ./assets/fonts/NotoSansJP-Regular.otf
+  bubble_style: round              # round | rectangle | cloud

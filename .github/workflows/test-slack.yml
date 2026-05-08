@@ -1,0 +1,28 @@
+name: test-slack
+
+# Manual smoke test: posts a generated PNG to the Slack channel
+# configured via SLACK_CHANNEL_ID. Used to verify Repository Secrets
+# and bot scopes are wired up correctly.
+on:
+  workflow_dispatch:
+
+jobs:
+  test-slack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run yonkomatic test slack
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+        run: uv run yonkomatic test slack

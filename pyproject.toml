@@ -1,0 +1,64 @@
+[project]
+name = "yonkomatic"
+version = "0.1.0"
+description = "AI-generated yonkoma manga, automatically published daily to Slack, Discord, and a static site."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "yonkomatic contributors" }]
+keywords = ["manga", "ai", "slack", "discord", "automation", "claude", "gemini"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+    "typer>=0.12",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "pyyaml>=6.0",
+    "slack-sdk>=3.27",
+    "pillow>=10.3",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+yonkomatic = "yonkomatic.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/jumboly/yonkomatic"
+Issues = "https://github.com/jumboly/yonkomatic/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/yonkomatic"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# B008: typer's idiomatic API uses typer.Option() / typer.Argument() in defaults.
+"src/yonkomatic/cli.py" = ["B008"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.12",
+]
