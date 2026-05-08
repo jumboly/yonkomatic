@@ -15,6 +15,7 @@ config's ``bubble_style`` controlling only the speech case.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
 
@@ -22,6 +23,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 from yonkomatic.config import BubbleStyle, TextRenderMode
 from yonkomatic.scenario.schema import DialogueKind, ScenarioEpisode
+
+_BubbleDrawer = Callable[[ImageDraw.ImageDraw, tuple[int, int, int, int], int], None]
 
 # Loading a TrueType/OpenType font involves a syscall and FreeType setup.
 # Reusing across panels (and across episodes within one process) is cheap
@@ -142,38 +145,54 @@ def _load_font(font_path: Path, size: int) -> ImageFont.FreeTypeFont:
     return font
 
 
-def _wrap_japanese(text: str, font: ImageFont.FreeTypeFont, max_width: float) -> list[str]:
-    """Wrap by measured pixel width (Japanese has no word boundaries).
+def _wrap_japanese(
+    text: str, font: ImageFont.FreeTypeFont, max_width: float
+) -> tuple[list[str], list[float]]:
+    """Wrap by measured pixel width and return ``(lines, line_widths)``.
 
     Why width-based instead of fixed column count: at smaller font sizes a
     fixed char count over-fills bubbles; at larger sizes it under-fills.
-    Measuring per-character with ``font.getlength`` keeps wraps tight
-    regardless of size.
+    Why we accumulate per-character widths instead of remeasuring the
+    growing prefix: remeasuring is O(n²) over text length; accumulating
+    is O(n). Returning widths lets the caller skip a second pass with
+    ``max(font.getlength(line) for line in lines)``.
     """
     if not text:
-        return []
+        return [], []
 
     lines: list[str] = []
+    widths: list[float] = []
     current = ""
+    current_w = 0.0
     for ch in text:
-        if font.getlength(current + ch) <= max_width:
-            current += ch
-            continue
-        if current:
+        ch_w = font.getlength(ch)
+        if current and current_w + ch_w > max_width:
             lines.append(current)
-        current = ch
+            widths.append(current_w)
+            current, current_w = ch, ch_w
+        else:
+            current += ch
+            current_w += ch_w
     if current:
         lines.append(current)
+        widths.append(current_w)
 
-    # Naive 禁則: pull line-leading 、。」 onto previous line.
-    fixed: list[str] = []
-    for line in lines:
-        if fixed and line and line[0] in _NO_LINE_HEAD:
-            fixed[-1] += line[0]
+    # Naive 禁則: pull line-leading 、。」 back onto previous line and keep
+    # widths consistent so callers can rely on ``zip(lines, widths)``.
+    fixed_lines: list[str] = []
+    fixed_widths: list[float] = []
+    for line, width in zip(lines, widths, strict=True):
+        if fixed_lines and line and line[0] in _NO_LINE_HEAD:
+            head = line[0]
+            head_w = font.getlength(head)
+            fixed_lines[-1] += head
+            fixed_widths[-1] += head_w
             line = line[1:]
+            width -= head_w
         if line:
-            fixed.append(line)
-    return fixed
+            fixed_lines.append(line)
+            fixed_widths.append(width)
+    return fixed_lines, fixed_widths
 
 
 def _draw_one_bubble(
@@ -200,12 +219,12 @@ def _draw_one_bubble(
         pad_x = font_size * 0.9
         pad_y = font_size * 0.7
         text_max_w = max_bubble_w - pad_x * 2
-        lines = _wrap_japanese(text, font, text_max_w)
+        lines, widths = _wrap_japanese(text, font, text_max_w)
         if not lines:
             return
 
         line_h = font_size * 1.15
-        text_w = max(font.getlength(line) for line in lines)
+        text_w = max(widths)
         text_h = line_h * len(lines)
         bubble_w = text_w + pad_x * 2
         bubble_h = text_h + pad_y * 2
@@ -239,16 +258,7 @@ def _draw_one_bubble(
     )
     line_w = max(2, int(font_size * 0.12))
 
-    if kind == "thought":
-        _draw_cloud(draw, bbox, line_w)
-    elif kind == "shout":
-        _draw_burst(draw, bbox, line_w)
-    elif speech_style == "rectangle":
-        _draw_rectangle(draw, bbox, line_w)
-    elif speech_style == "cloud":
-        _draw_cloud(draw, bbox, line_w)
-    else:
-        _draw_ellipse(draw, bbox, line_w)
+    _select_drawer(kind, speech_style)(draw, bbox, line_w)
 
     draw.multiline_text(
         (cx, cy),
@@ -338,3 +348,19 @@ def _draw_burst(
         pts.append((int(cx + r_x * math.cos(angle)), int(cy + r_y * math.sin(angle))))
 
     draw.polygon(pts, fill=(255, 255, 255), outline=(0, 0, 0), width=line_w)
+
+
+# Speech bubbles use the configurable shape; thought/shout are forced.
+_SPEECH_DRAWERS: dict[BubbleStyle, _BubbleDrawer] = {
+    "round": _draw_ellipse,
+    "rectangle": _draw_rectangle,
+    "cloud": _draw_cloud,
+}
+
+
+def _select_drawer(kind: DialogueKind, speech_style: BubbleStyle) -> _BubbleDrawer:
+    if kind == "thought":
+        return _draw_cloud
+    if kind == "shout":
+        return _draw_burst
+    return _SPEECH_DRAWERS[speech_style]
