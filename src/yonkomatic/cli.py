@@ -30,6 +30,7 @@ from yonkomatic.panel.validator import ValidationResult, validate
 from yonkomatic.publisher.base import Episode, Publisher, PublishResult
 from yonkomatic.publisher.slack import SlackPublisher
 from yonkomatic.publisher.static_site import StaticSitePublisher
+from yonkomatic.scenario.generator import generate_week
 from yonkomatic.scenario.schema import ScenarioEpisode
 from yonkomatic.state.repo import HistoryEntry, StateStore
 
@@ -288,6 +289,23 @@ def _today_in_configured_tz(cfg: Config) -> str:
     return datetime.now(ZoneInfo(cfg.schedule.timezone)).date().isoformat()
 
 
+def _current_iso_week(cfg: Config) -> str:
+    iso = datetime.now(ZoneInfo(cfg.schedule.timezone)).isocalendar()
+    return f"{iso.year:04d}-W{iso.week:02d}"
+
+
+def _resolve_theme_filename(cfg: Config, content_dir: Path) -> str:
+    """Pick the monthly theme file (YYYY-MM.md) when present, otherwise default.md.
+
+    Why: SPEC.md prescribes ``themes/{YYYY-MM}.md`` for monthly mood, but the
+    bare template only ships ``default.md``. Falling back keeps fresh checkouts
+    runnable while honoring the monthly file the moment a user adds one.
+    """
+    month = datetime.now(ZoneInfo(cfg.schedule.timezone)).strftime("%Y-%m")
+    monthly = cfg.content.themes_path(content_dir) / f"{month}.md"
+    return f"{month}.md" if monthly.exists() else "default.md"
+
+
 def _build_publishers(cfg: Config) -> list[Publisher]:
     """Instantiate every enabled publisher; secrets are read from os.environ here."""
     publishers: list[Publisher] = []
@@ -531,6 +549,82 @@ def publish(
     )
     state.append(entry)
     console.print(f"  state updated: [dim]{state_path}[/dim]")
+
+
+@app.command("generate-scenarios")
+def generate_scenarios(
+    week: str | None = typer.Option(
+        None,
+        "--week",
+        help="ISO week (e.g. 2026-W19). Defaults to today's week in config schedule.timezone.",
+    ),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help="Output JSON path. Defaults to scenarios/{week}.json.",
+    ),
+    content_dir: Path = typer.Option(
+        Path("examples/minimal"),
+        "--content",
+        help="Directory holding characters/, world/, samples/, themes/.",
+    ),
+    no_news: bool = typer.Option(
+        False,
+        "--no-news",
+        help="Skip RSS fetch even if news.enabled is true.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite an existing scenarios/{week}.json.",
+    ),
+    config_path: Path = typer.Option(Path("config.yaml"), "--config"),
+) -> None:
+    """Ask Claude for 7 episodes for the given ISO week."""
+    cfg = load_config(config_path)
+    target_week = week or _current_iso_week(cfg)
+    output_path = out or Path("scenarios") / f"{target_week}.json"
+
+    if output_path.exists() and not force:
+        err_console.print(
+            f"[red]error:[/red] {output_path} already exists. Use --force to overwrite."
+        )
+        raise typer.Exit(code=1)
+
+    with _fail_on("load content pack"):
+        pack = ContentPack.from_dir(
+            content_dir,
+            content_cfg=cfg.content,
+            theme_filename=_resolve_theme_filename(cfg, content_dir),
+        )
+
+    api_key = _require_env(cfg.ai.scenario_api_key_env)
+    claude = ClaudeClient(model=cfg.ai.scenario_model, api_key=api_key)
+
+    headlines: list[str] = []
+    if no_news or not cfg.news.enabled:
+        console.print("[dim]news fetch skipped[/dim]")
+
+    console.print(
+        f"asking [cyan]{cfg.ai.scenario_model}[/cyan] for 7 episodes "
+        f"for week [cyan]{target_week}[/cyan]…"
+    )
+    with _fail_on("scenario generation failed"):
+        scenarios = generate_week(
+            claude=claude,
+            pack=pack,
+            week=target_week,
+            news_headlines=headlines or None,
+        )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        scenarios.model_dump_json(indent=2) + "\n",
+        encoding="utf-8",
+    )
+    console.print(
+        f"[green]✓ saved[/green] {output_path} ({len(scenarios.episodes)} episodes)"
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover
