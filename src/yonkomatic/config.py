@@ -27,7 +27,7 @@ class ContentConfig(BaseModel):
 class AIConfig(BaseModel):
     scenario_model: str = "claude-sonnet-4-6"
     image_model: str = "gemini-3.1-flash-image-preview"
-    image_size: str = "2K"
+    image_size: str = "1K"  # 開発デフォルトは 1K。本番運用では 2K を検討
     aspect_ratio: str = "3:4"
     max_image_retries: int = 3
 

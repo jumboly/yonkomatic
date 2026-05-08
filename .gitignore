@@ -22,11 +22,12 @@ env/
 .env.local
 .env.*.local
 
-# IDE
+# IDE / tool state
 .vscode/
 .idea/
 *.swp
 *.swo
+.claude/
 
 # OS
 .DS_Store

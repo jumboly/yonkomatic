@@ -10,7 +10,8 @@ content:
 ai:
   scenario_model: claude-sonnet-4-6
   image_model: gemini-3.1-flash-image-preview
-  image_size: "2K"                 # 512 | 1K | 2K | 4K
+  # 開発・テスト時は 1K 推奨 (生成が速く安価)。本番運用で品質が必要になったら 2K へ。
+  image_size: "1K"                 # 512 | 1K | 2K | 4K
   aspect_ratio: "3:4"              # 縦長4コマ
   max_image_retries: 3
 
