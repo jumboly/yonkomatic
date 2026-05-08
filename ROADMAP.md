@@ -118,7 +118,7 @@
 - **2026-05-09** publish と publish-today は `_publish_episode_pipeline()` (内部ヘルパ) を共有。同じ Stage1-6 を 2 ヶ所に書きたくないため、scenario の **取得方法** だけが分岐するインターフェースに揃えた。
 - **2026-05-09** GitHub Actions ワークフローの commit/push は **利用者ブランチ前提**。main の `.gitignore` で `/scenarios/`/`/state/`/`/output/`/`/docs/*` は無視されているので、利用者は fork 後に該当パスを `.gitignore` から外す (or 該当ファイルを `git add -f`)。SETUP.md (Step 5) で具体的な手順を案内。
 - **2026-05-09** news fetcher は **feed 単位で例外吸収**して空 list を返す方針。Publisher の独立性 (1 つの障害が全体を倒さない) と同じ思想で、ニュース取得失敗はシナリオ生成を止めない。
-- **2026-05-09** Step 4 はサブステップ 4a/4b/4c/4d で commit を分ける。各完了時に `/simplify` レビュー + ROADMAP 更新 + ユーザーレビュー依頼。
+- **2026-05-09 (訂正)** Step を分割して commit する場合でも、`/simplify` は **Step 全体完了時に 1 回だけ** 回す (サブステップ毎の細粒度レビューは粒度過剰)。サブステップ毎の commit リズムは維持。
 - **2026-05-09** 週次シナリオ生成は **毎回 Claude を叩く**。`scenarios/{week}.json` は `--force` がない限り上書きしない (誤って上書きすると過去アーカイブとの整合が壊れるため)。
 - **2026-05-09** `generate-scenarios` は月別テーマ (`themes/{YYYY-MM}.md`) があれば優先、なければ既存 `default.md` にフォールバック。SPEC.md L125 の月別仕様と既存 `panel/description.py` の `default.md` 既定を generator 側でブリッジ。`publish` (Step 3) の挙動は据え置き。
 - **2026-05-09 (再決定)** ROADMAP.md / SPEC.md を `docs/` から **リポジトリルート** に移動。`static_site.output_dir` は `./docs` のまま (一度 `./site` に変えたが、GitHub Pages の "Deploy from a branch" が `/(root)` か `/docs` しか選べないため戻した)。docs/ は今後 Pages 公開用、ドキュメントはルート直下で OSS 慣例 (`README.md` / `CLAUDE.md`) に揃える。`.gitignore` は docs/ の生成物 (`index.html` / `posts/` / `images/` / `css/` / `.posts-index.json`) のみ ignore。
