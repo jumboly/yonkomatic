@@ -554,6 +554,7 @@ def _publish_episode_pipeline(
             episode=episode_data,
             mode=cfg.text_rendering.mode,
             font_path=cfg.text_rendering.font_path,
+            bubble_style=cfg.text_rendering.bubble_style,
         )
 
     validation = validate(image_bytes=final_bytes, episode=episode_data)
