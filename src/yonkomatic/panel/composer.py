@@ -1,10 +1,15 @@
 """Stage 3: composite Japanese text overlays onto the Gemini-rendered image.
 
-Why this exists: Gemini 3.1 Flash Image hallucinates Japanese characters
-when asked to draw multiple speech bubbles in a single image — the symptom
-is plausibly-shaped but meaningless kana strings. We instruct Gemini in
-``panel/description.py`` to draw NO text/bubbles, then this module composites
-PIL-rendered Japanese on top using the dialogue text from the scenario.
+Why this exists: lower-tier Gemini image models hallucinate Japanese
+characters when asked to draw multiple speech bubbles in a single image —
+the symptom is plausibly-shaped but meaningless kana strings. In
+``mode="pil_overlay"`` we instruct Gemini in ``panel/description.py`` to
+draw NO text/bubbles, then this module composites PIL-rendered Japanese
+on top using the dialogue text from the scenario.
+
+In ``mode="model_render"`` (used with higher-tier models that can draw
+legible Japanese) this module is a pass-through; Gemini's output is
+returned unchanged.
 
 Layout is deterministic (no image analysis): each panel is divided into
 fixed regions and dialogues are placed by count. Bubble shape is chosen
@@ -45,12 +50,11 @@ def compose(
 ) -> bytes:
     """Overlay the episode's dialogue onto the rendered image.
 
-    ``mode='never'`` returns image_bytes unchanged. ``'fallback'`` and
-    ``'always'`` are equivalent — Gemini is now prompted to leave bubbles
-    empty, so there is no distinction between "fall back when needed" and
-    "always overlay".
+    ``mode='model_render'`` returns image_bytes unchanged (the image model
+    already drew bubbles + text). ``mode='pil_overlay'`` runs the PIL
+    composition path.
     """
-    if mode == "never":
+    if mode == "model_render":
         return image_bytes
 
     if font_path is None:

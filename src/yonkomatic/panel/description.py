@@ -3,10 +3,16 @@
 Claude is given the scenario JSON, the character settings, the world
 settings and the STYLE.md, and is asked to compose ONE long English
 prompt that instructs Gemini to render all four panels stacked vertically
-(3:4 aspect) as a single image. Dialogue is passed as a *composition hint*
-only — Gemini is explicitly told NOT to draw bubbles or text, since the
-post-processing PIL overlay (``panel/composer.py``) handles Japanese
-rendering to avoid Gemini's hallucinated-kana failure mode.
+(3:4 aspect) as a single image.
+
+Two modes (selected via ``text_rendering.mode`` in config):
+
+- ``pil_overlay``: dialogue is passed as a *composition hint* only — Gemini
+  is told NOT to draw bubbles or text, and PIL overlays Japanese after.
+  Use with lower-tier models (Flash) that hallucinate kana.
+- ``model_render``: Gemini is told to draw proper speech bubbles with
+  the exact Japanese dialogue inside. Skips PIL overlay. Only viable on
+  higher-tier models (e.g. ``gemini-3-pro-image-preview``).
 """
 
 from __future__ import annotations
@@ -15,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from yonkomatic.ai.claude_client import ClaudeClient
-from yonkomatic.config import ContentConfig
+from yonkomatic.config import ContentConfig, TextRenderMode
 from yonkomatic.scenario.schema import Panel, ScenarioEpisode
 
 
@@ -63,25 +69,32 @@ def _read_optional(path: Path) -> str | None:
         return None
 
 
-def _format_panel(panel: Panel) -> str:
+def _format_panel(panel: Panel, mode: TextRenderMode) -> str:
     lines = [
         f"Panel {panel.index}",
         f"  description: {panel.description}",
         f"  characters: {', '.join(panel.characters) or '(none)'}",
     ]
     if panel.dialogue:
-        lines.append("  dialogue (do NOT render as text in the image; for composition hints only):")
+        if mode == "pil_overlay":
+            header = "  dialogue (do NOT render as text in the image; for composition hints only):"
+        else:
+            header = (
+                "  dialogue (render exactly as Japanese text inside speech bubbles, "
+                "attributed to the speaker; preserve every character verbatim):"
+            )
+        lines.append(header)
         lines.extend(f'    - {d.speaker}: 「{d.text}」' for d in panel.dialogue)
     else:
         lines.append("  dialogue: (none)")
     return "\n".join(lines)
 
 
-SYSTEM_PROMPT = """\
+SYSTEM_PROMPT_PIL_OVERLAY = """\
 あなたは4コマ漫画の画像生成プロンプトを書く専門家です。日本語のシナリオと
-キャラクター・世界観・画風の資料を受け取り、Gemini 3.1 Flash Image が
-1枚の縦長 PNG (アスペクト比 3:4) として 4 コマ全体を描けるよう、
-英語の単一プロンプトを出力してください。
+キャラクター・世界観・画風の資料を受け取り、Gemini Image が 1枚の縦長
+PNG (アスペクト比 3:4) として 4 コマ全体を描けるよう、英語の単一プロンプ
+トを出力してください。
 
 要件:
 - 4 コマを縦に等しい高さで並べる構成。各コマの境界は細い黒線
@@ -108,14 +121,52 @@ SYSTEM_PROMPT = """\
 """
 
 
+SYSTEM_PROMPT_MODEL_RENDER = """\
+あなたは4コマ漫画の画像生成プロンプトを書く専門家です。日本語のシナリオと
+キャラクター・世界観・画風の資料を受け取り、Gemini Image が 1枚の縦長
+PNG (アスペクト比 3:4) として 4 コマ全体を描けるよう、英語の単一プロンプ
+トを出力してください。
+
+このモードでは画像モデル自身に吹き出しと日本語の台詞を描かせます。
+
+要件:
+- 4 コマを縦に等しい高さで並べる構成。各コマの境界は細い黒線
+- 各パネルの構図、キャラクター配置、表情、背景を具体的に
+- **吹き出しと台詞テキストは画像モデルに描かせる**。各 dialogue 行を
+  発言者ごとに白い吹き出しに入れ、入力された日本語テキスト (ひらがな・
+  カタカナ・漢字) を **一字一句正確に** 再現する。台詞を要約・翻訳・
+  英訳しない
+- プロンプトには英語で `render legible Japanese speech bubbles for the
+  given dialogue. Each bubble must contain the exact Japanese characters
+  provided — do NOT paraphrase, translate, romanize, or substitute with
+  pseudo-Japanese glyphs. Use clean white speech balloons with a thin
+  black outline, attached to the corresponding speaker via a small tail.
+  Position bubbles so they do not occlude faces. Preserve every hiragana,
+  katakana, and kanji exactly as written in the dialogue list` の
+  ような指示を必ず含める
+- 同一パネル内の dialogue 件数が複数あれば、speaker 順に上→下 / 左→右で
+  自然に配置するよう指示する
+- 表情・口の開き・視線・ポーズは台詞のニュアンスに沿って描写する
+- 画風は与えられた STYLE.md に厳密に従う
+- 出力は **プロンプト本文だけ**。前置きや解説は書かない
+"""
+
+
+def _system_prompt_for(mode: TextRenderMode) -> str:
+    return (
+        SYSTEM_PROMPT_PIL_OVERLAY if mode == "pil_overlay" else SYSTEM_PROMPT_MODEL_RENDER
+    )
+
+
 def build_image_prompt(
     *,
     episode: ScenarioEpisode,
     pack: ContentPack,
     claude: ClaudeClient,
+    mode: TextRenderMode,
 ) -> str:
     """Ask Claude to assemble a single English prompt for Gemini."""
-    panels_block = "\n\n".join(_format_panel(p) for p in episode.panels)
+    panels_block = "\n\n".join(_format_panel(p, mode) for p in episode.panels)
 
     user = f"""\
 # シナリオ
@@ -141,7 +192,7 @@ def build_image_prompt(
         user += f"\n# 月別テーマ\n\n{pack.theme_md}\n"
 
     return claude.complete(
-        system=SYSTEM_PROMPT,
+        system=_system_prompt_for(mode),
         user=user,
         temperature=0.4,
     ).strip()

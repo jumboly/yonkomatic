@@ -9,6 +9,8 @@ content:
 
 ai:
   scenario_model: claude-sonnet-4-6
+  # Pro モデル (gemini-3-pro-image-preview) に差し替えるとテキスト描画品質が
+  # 上がる可能性がある (text_rendering.mode = model_render と組み合わせて検証)。
   image_model: gemini-3.1-flash-image-preview
   # 開発・テスト時は 1K 推奨 (生成が速く安価)。本番運用で品質が必要になったら 2K へ。
   image_size: "1K" # 512 | 1K | 2K | 4K
@@ -48,10 +50,13 @@ news:
   language: ja
 
 text_rendering:
-  # always: PIL で日本語吹き出しをオーバーレイ (Step 5 で本実装)。Gemini は
-  # 複数吹き出しの画面で日本語を文字化けさせるため、後段で PIL 合成する。
-  # 利用前に `uv run python scripts/install_fonts.py` で Noto Sans JP を取得。
-  # never に切替えると PIL オーバーレイをスキップ (Gemini 出力をそのまま使う)。
-  mode: always # always | fallback | never
+  # pil_overlay: Gemini に吹き出し・テキストを描かせず、PIL で日本語を後段
+  # オーバーレイする。下位モデル (Flash 系) でも誤字なく日本語が出せる確実
+  # 路線。利用前に `uv run python scripts/install_fonts.py` で Noto Sans JP
+  # を取得すること。
+  # model_render: 画像モデル自身に吹き出し+日本語を描かせ、PIL オーバーレイ
+  # をスキップ。日本語を綺麗に描けるモデル (gemini-3-pro-image-preview 等)
+  # でのみ実用。CLI の `--text-mode model_render` で都度 A/B 検証できる。
+  mode: pil_overlay # pil_overlay | model_render
   font_path: ./assets/fonts/NotoSansJP-Regular.otf
   bubble_style: round # round | rectangle | cloud (kind="speech" のみに適用)

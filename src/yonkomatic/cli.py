@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from datetime import date as _date
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
 import typer
@@ -23,7 +23,7 @@ from rich.console import Console
 from yonkomatic import __version__
 from yonkomatic.ai.claude_client import ClaudeClient
 from yonkomatic.ai.gemini_client import GeminiImageClient, GeminiImageResult
-from yonkomatic.config import Config, load_config
+from yonkomatic.config import Config, TextRenderMode, load_config
 from yonkomatic.news.fetcher import fetch_recent_headlines
 from yonkomatic.panel.composer import compose
 from yonkomatic.panel.description import ContentPack, build_image_prompt
@@ -72,6 +72,44 @@ def _require_env(name: str, *, hint: str = "") -> str:
         err_console.print(msg)
         raise typer.Exit(code=1)
     return value
+
+
+TextModeOption = Annotated[
+    TextRenderMode | None,
+    typer.Option(
+        "--text-mode",
+        help="Override text_rendering.mode for this run (pil_overlay | model_render).",
+    ),
+]
+ImageModelOption = Annotated[
+    str | None,
+    typer.Option(
+        "--image-model",
+        help="Override ai.image_model for this run (e.g. gemini-3-pro-image-preview).",
+    ),
+]
+
+
+def _apply_cli_overrides(
+    cfg: Config,
+    *,
+    text_mode: TextRenderMode | None = None,
+    image_model: str | None = None,
+) -> Config:
+    """Merge CLI flag overrides into cfg via sub-model copy.
+
+    Lets operators A/B test ``text_rendering.mode`` (pil_overlay vs
+    model_render) and ``ai.image_model`` without editing config.yaml.
+    text_mode is already a typer-validated Literal; image_model is
+    free-form (the SDK rejects unknown ids), so no Pydantic re-validation
+    is needed.
+    """
+    updates: dict[str, Any] = {}
+    if text_mode is not None:
+        updates["text_rendering"] = cfg.text_rendering.model_copy(update={"mode": text_mode})
+    if image_model is not None:
+        updates["ai"] = cfg.ai.model_copy(update={"image_model": image_model})
+    return cfg.model_copy(update=updates) if updates else cfg
 
 
 def _save_image(output: Path, image_bytes: bytes, mime_type: str) -> Path:
@@ -275,14 +313,22 @@ def test_panel(
         help="Where to save the generated 4-panel image.",
     ),
     config_path: Path = typer.Option(Path("config.yaml"), "--config"),
+    text_mode: TextModeOption = None,
+    image_model: ImageModelOption = None,
     save_prompt: bool = typer.Option(
         True,
         "--save-prompt/--no-save-prompt",
         help="Also write the Claude-generated prompt next to the image.",
     ),
 ) -> None:
-    """Run the Stage1+Stage2 pipeline once: scenario → prompt (Claude) → image (Gemini)."""
-    cfg = load_config(config_path)
+    """Run the full image pipeline once: scenario → prompt (Claude) → image (Gemini) → compose.
+
+    Stage 3 (compose) runs as well so the saved image reflects the final
+    output as it would be published — when ``mode=pil_overlay`` Japanese
+    bubbles are overlaid; when ``mode=model_render`` Gemini's output is
+    passed through unchanged.
+    """
+    cfg = _apply_cli_overrides(load_config(config_path), text_mode=text_mode, image_model=image_model)
 
     episode = ScenarioEpisode.model_validate_json(scenario_path.read_text(encoding="utf-8"))
     console.print(f"loaded scenario: [cyan]{episode.title}[/cyan] ({len(episode.panels)} panels)")
@@ -292,9 +338,17 @@ def test_panel(
 
     claude_key = _require_env(cfg.ai.scenario_api_key_env)
     claude = ClaudeClient(model=cfg.ai.scenario_model, api_key=claude_key)
-    console.print(f"asking [cyan]{cfg.ai.scenario_model}[/cyan] for image prompt…")
+    console.print(
+        f"asking [cyan]{cfg.ai.scenario_model}[/cyan] for image prompt "
+        f"(text mode: [cyan]{cfg.text_rendering.mode}[/cyan])…"
+    )
     with _fail_on("prompt generation failed"):
-        image_prompt = build_image_prompt(episode=episode, pack=pack, claude=claude)
+        image_prompt = build_image_prompt(
+            episode=episode,
+            pack=pack,
+            claude=claude,
+            mode=cfg.text_rendering.mode,
+        )
 
     if save_prompt:
         prompt_path = output.with_suffix(".prompt.txt")
@@ -303,9 +357,19 @@ def test_panel(
         console.print(f"  wrote prompt: [dim]{prompt_path}[/dim]")
 
     result = _run_gemini(cfg, prompt=image_prompt, refs=refs)
-    saved = _save_image(output, result.image_bytes, result.mime_type)
+
+    with _fail_on("compose"):
+        final_bytes = compose(
+            image_bytes=result.image_bytes,
+            episode=episode,
+            mode=cfg.text_rendering.mode,
+            font_path=cfg.text_rendering.font_path,
+            bubble_style=cfg.text_rendering.bubble_style,
+        )
+
+    saved = _save_image(output, final_bytes, result.mime_type)
     console.print(
-        f"[green]✓ saved[/green] {saved} ({len(result.image_bytes)} bytes, {result.mime_type})"
+        f"[green]✓ saved[/green] {saved} ({len(final_bytes)} bytes, {result.mime_type})"
     )
 
 
@@ -494,6 +558,8 @@ def publish(
         "--archive-dir",
         help="Where {date}.png and {date}.json are written for reproducibility.",
     ),
+    text_mode: TextModeOption = None,
+    image_model: ImageModelOption = None,
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -501,7 +567,7 @@ def publish(
     ),
 ) -> None:
     """Run the full pipeline: scenario → image → multi-publish + archive."""
-    cfg = load_config(config_path)
+    cfg = _apply_cli_overrides(load_config(config_path), text_mode=text_mode, image_model=image_model)
 
     with _fail_on("load scenario"):
         episode_data = ScenarioEpisode.model_validate_json(
@@ -544,7 +610,12 @@ def _publish_episode_pipeline(
     claude = ClaudeClient(model=cfg.ai.scenario_model, api_key=claude_key)
     console.print(f"asking [cyan]{cfg.ai.scenario_model}[/cyan] for image prompt…")
     with _fail_on("prompt generation failed"):
-        image_prompt = build_image_prompt(episode=episode_data, pack=pack, claude=claude)
+        image_prompt = build_image_prompt(
+            episode=episode_data,
+            pack=pack,
+            claude=claude,
+            mode=cfg.text_rendering.mode,
+        )
 
     gemini_result = _run_gemini(cfg, prompt=image_prompt, refs=refs)
 
@@ -651,10 +722,12 @@ def publish_today(
         help="Directory containing {YYYY-Www}.json scenario files.",
     ),
     archive_dir: Path = typer.Option(Path("output/archive"), "--archive-dir"),
+    text_mode: TextModeOption = None,
+    image_model: ImageModelOption = None,
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     """Pick the next episode for today's ISO week from scenarios/, then publish."""
-    cfg = load_config(config_path)
+    cfg = _apply_cli_overrides(load_config(config_path), text_mode=text_mode, image_model=image_model)
     pub_date = date_str or _today_in_configured_tz(cfg)
     target_week = _iso_week_of(pub_date)
     week_path = scenarios_dir / f"{target_week}.json"

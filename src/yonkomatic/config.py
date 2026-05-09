@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 ImageSize = Literal["512", "1K", "2K", "4K"]
 AspectRatio = Literal["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"]
-TextRenderMode = Literal["always", "fallback", "never"]
+TextRenderMode = Literal["pil_overlay", "model_render"]
 BubbleStyle = Literal["round", "rectangle", "cloud"]
 
 
@@ -90,12 +90,13 @@ class NewsConfig(BaseModel):
 
 
 class TextRenderingConfig(BaseModel):
-    # Why "always" default: Gemini hallucinates Japanese characters when
-    # asked to render multiple speech bubbles in one image, so we instruct
-    # Gemini to skip text and composite Japanese with PIL afterwards. Users
-    # must run scripts/install_fonts.py once (or rely on the workflow cache)
-    # to provide Noto Sans JP.
-    mode: TextRenderMode = "always"
+    # Why "pil_overlay" default: lower-tier Gemini image models hallucinate
+    # Japanese characters when asked to render multiple bubbles, so we
+    # instruct Gemini to skip text and composite Japanese with PIL afterwards.
+    # "model_render" lets the image model draw bubbles + text directly
+    # (skips PIL); only viable on higher-tier models that can render
+    # legible Japanese reliably (e.g. gemini-3-pro-image-preview).
+    mode: TextRenderMode = "pil_overlay"
     font_path: Path = Path("./assets/fonts/NotoSansJP-Regular.otf")
     bubble_style: BubbleStyle = "round"
 
