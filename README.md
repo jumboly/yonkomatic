@@ -67,6 +67,10 @@ content/
 
 同梱サンプルがそのまま `content/prompt.md` に入っているので、まずはそのまま動作確認できます。プロンプトテンプレ自体をカスタマイズしたい上級者は `content/scenario_prompt.md` / `content/panel_prompt.md` を置けば組み込みデフォルトを上書きできます (フォールバック方式)。
 
+## 貢献
+
+開発ルール / Issue 方針は [`CONTRIBUTING.md`](CONTRIBUTING.md) を参照してください。
+
 ## ライセンス
 
 [MIT License](LICENSE)
