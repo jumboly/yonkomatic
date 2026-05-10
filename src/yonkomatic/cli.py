@@ -25,6 +25,7 @@ from rich.console import Console
 from yonkomatic import __version__
 from yonkomatic.ai.openai_client import (
     BatchImageJob,
+    BatchStatus,
     ImageResult,
     OpenAIClient,
     UsageTracker,
@@ -962,6 +963,163 @@ def _load_batch_job_meta(
     )
 
 
+def _drain_batch_results(
+    *,
+    status: BatchStatus,
+    save_dir: Path,
+    cid_to_meta: dict[str, dict[str, Any]],
+    openai: OpenAIClient,
+) -> list[dict[str, Any]]:
+    """Save successful images and return per-result manifest records.
+
+    Shared by the initial-batch and retry-batch fetch paths so both write
+    identical schemas into the manifest.
+    """
+    save_dir.mkdir(parents=True, exist_ok=True)
+    records: list[dict[str, Any]] = []
+    for r in status.results:
+        meta = cid_to_meta.get(r.custom_id, {})
+        ep_num = meta.get("episode_number")
+        record = {
+            "custom_id": r.custom_id,
+            "episode_number": ep_num,
+            "title": meta.get("title"),
+            "image_path": None,
+            "error": r.error,
+            "usage": r.usage,
+            "cost_usd": None,
+        }
+        if r.error or r.image_bytes is None:
+            err_console.print(f"[red]✗[/red] {r.custom_id}: {r.error or 'no image'}")
+            records.append(record)
+            continue
+        filename = f"ep{ep_num}.png" if ep_num is not None else f"{r.custom_id}.png"
+        out_path = _save_image(save_dir / filename, r.image_bytes, r.mime_type)
+        record["image_path"] = str(out_path)
+        call = openai.record_batch_image_result(r)
+        if call is not None:
+            record["cost_usd"] = call.cost_usd
+        records.append(record)
+        console.print(f"[green]✓[/green] {r.custom_id} → [dim]{out_path}[/dim]")
+    return records
+
+
+_MAX_BATCH_RETRIES = 2
+
+
+@app.command("batch-resubmit-missing")
+def batch_resubmit_missing(
+    week: str = typer.Option(..., "--week", help="ISO week, e.g. 2026-W19."),
+    manifest_path: Path | None = typer.Option(
+        None,
+        "--manifest",
+        help="Path to the batch manifest. Defaults to state/batches/{week}.yaml.",
+    ),
+    state_path: Path = typer.Option(Path("state/state.yaml"), "--state"),
+    config_path: Path = typer.Option(Path("config.yaml"), "--config"),
+) -> None:
+    """Resubmit a batch for episodes that are still pending and lack a preflight.
+
+    Daily cron path: after publish-today runs, any week-mate episode missing
+    both a state.history entry and a preflight image gets reissued in a new
+    OpenAI image batch. Reuses the original prompts (no text LLM call), so
+    the archive metadata stays consistent. Capped at 2 retries per week —
+    beyond that the publish path falls back to sync image generation.
+    """
+    cfg = load_config(config_path)
+    manifest_in = manifest_path or _default_batch_manifest_path(week)
+
+    if not manifest_in.exists():
+        # Why no error: a fresh fork (or a week before weekly-scenarios ran)
+        # legitimately has no manifest. The daily workflow runs this best-
+        # effort, so silent no-op is the desired outcome.
+        console.print(
+            f"[dim]no manifest at {manifest_in}; nothing to resubmit[/dim]"
+        )
+        return
+
+    manifest = yaml.safe_load(manifest_in.read_text(encoding="utf-8")) or {}
+
+    if manifest.get("status") != "completed":
+        console.print(
+            f"[dim]main batch not yet completed (status={manifest.get('status')!r}); "
+            "skip resubmit until batch-fetch-images drains the initial batch[/dim]"
+        )
+        return
+
+    retries = manifest.get("retries") or []
+    if len(retries) >= _MAX_BATCH_RETRIES:
+        console.print(
+            f"[yellow]retry cap reached[/yellow] "
+            f"({len(retries)}/{_MAX_BATCH_RETRIES}); leaving remaining episodes "
+            "to sync fallback in publish-today"
+        )
+        return
+
+    state = StateStore(state_path).load()
+    published_eps = {
+        h.episode_number
+        for h in state.history
+        if h.week == week
+    }
+
+    pending_jobs: list[dict[str, Any]] = []
+    for job in manifest.get("jobs", []):
+        ep = job.get("episode_number")
+        if ep is None or ep in published_eps:
+            continue
+        if _find_preflight_image(week, ep) is not None:
+            continue
+        pending_jobs.append(job)
+
+    if not pending_jobs:
+        console.print("[green]nothing to resubmit[/green] — all pending episodes have preflight")
+        return
+
+    pending_label = ", ".join(f"ep{j['episode_number']}" for j in pending_jobs)
+    console.print(
+        f"resubmitting [cyan]{len(pending_jobs)}[/cyan] episode(s) "
+        f"({pending_label}) as retry #{len(retries) + 1} of {_MAX_BATCH_RETRIES}"
+    )
+
+    tracker = UsageTracker()
+    openai = _build_openai_client(cfg, usage_tracker=tracker)
+
+    jobs = [
+        BatchImageJob(
+            custom_id=j["custom_id"],
+            prompt=j["rendered_image_prompt"],
+        )
+        for j in pending_jobs
+    ]
+    with _fail_on("retry batch submit failed"):
+        retry_batch_id = openai.submit_image_batch(
+            jobs=jobs, size=cfg.ai.image_size
+        )
+
+    retry_entry = {
+        "batch_id": retry_batch_id,
+        "submitted_at": datetime.now(ZoneInfo("UTC")).isoformat(),
+        "custom_ids": [j.custom_id for j in jobs],
+        "status": "submitted",
+        "fetched_at": None,
+        "results": [],
+    }
+    manifest.setdefault("retries", []).append(retry_entry)
+    manifest_in.write_text(
+        yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    console.print(
+        f"[green]✓ submitted[/green] retry batch [cyan]{retry_batch_id}[/cyan]; "
+        f"manifest at [dim]{manifest_in}[/dim]"
+    )
+    console.print(
+        "  poll with: [bold]yonkomatic batch-fetch-images "
+        f"--week {week}[/bold]"
+    )
+
+
 @app.command("batch-submit-images")
 def batch_submit_images(
     week: str = typer.Option(
@@ -1152,46 +1310,61 @@ def batch_fetch_images(
         f"({status.completed}/{status.total} done, {status.failed} failed)"
     )
 
-    if status.status != "completed":
+    cid_to_meta = {j["custom_id"]: j for j in manifest.get("jobs", [])}
+    main_completed_now = False
+
+    if status.status == "completed" and manifest.get("status") != "completed":
+        manifest["results"] = _drain_batch_results(
+            status=status,
+            save_dir=save_dir,
+            cid_to_meta=cid_to_meta,
+            openai=openai,
+        )
+        manifest["status"] = "completed"
+        manifest["fetched_at"] = datetime.now(ZoneInfo("UTC")).isoformat()
+        main_completed_now = True
+    elif status.status != "completed":
         console.print(
             "[yellow]not yet complete[/yellow] — try again later "
             "(OpenAI batches finish within 24h of submission)"
         )
+
+    # Why also poll retries here: batch-resubmit-missing appends entries to
+    # `manifest.retries[]` when the daily cron detects pending episodes
+    # without preflight. Folding their poll into the same fetch step keeps
+    # the daily-publish workflow with a single fetch call regardless of
+    # whether retries exist.
+    retries = manifest.get("retries") or []
+    retry_completed_any = False
+    for retry in retries:
+        if retry.get("status") == "completed":
+            continue
+        retry_id = retry.get("batch_id")
+        if not retry_id:
+            continue
+        console.print(f"polling retry batch [cyan]{retry_id}[/cyan]…")
+        with _fail_on("retry batch fetch failed"):
+            sub_status = openai.fetch_image_batch(retry_id)
+        console.print(
+            f"  status: [bold]{sub_status.status}[/bold] "
+            f"({sub_status.completed}/{sub_status.total} done, "
+            f"{sub_status.failed} failed)"
+        )
+        if sub_status.status != "completed":
+            continue
+        retry["results"] = _drain_batch_results(
+            status=sub_status,
+            save_dir=save_dir,
+            cid_to_meta=cid_to_meta,
+            openai=openai,
+        )
+        retry["status"] = "completed"
+        retry["fetched_at"] = datetime.now(ZoneInfo("UTC")).isoformat()
+        retry_completed_any = True
+
+    if not (main_completed_now or retry_completed_any):
         return
 
-    save_dir.mkdir(parents=True, exist_ok=True)
-    cid_to_meta = {j["custom_id"]: j for j in manifest.get("jobs", [])}
-    result_records: list[dict[str, Any]] = []
-
-    for r in status.results:
-        meta = cid_to_meta.get(r.custom_id, {})
-        ep_num = meta.get("episode_number")
-        record = {
-            "custom_id": r.custom_id,
-            "episode_number": ep_num,
-            "title": meta.get("title"),
-            "image_path": None,
-            "error": r.error,
-            "usage": r.usage,
-            "cost_usd": None,
-        }
-        if r.error or r.image_bytes is None:
-            err_console.print(f"[red]✗[/red] {r.custom_id}: {r.error or 'no image'}")
-            result_records.append(record)
-            continue
-
-        filename = f"ep{ep_num}.png" if ep_num is not None else f"{r.custom_id}.png"
-        out_path = _save_image(save_dir / filename, r.image_bytes, r.mime_type)
-        record["image_path"] = str(out_path)
-        call = openai.record_batch_image_result(r)
-        if call is not None:
-            record["cost_usd"] = call.cost_usd
-        result_records.append(record)
-        console.print(f"[green]✓[/green] {r.custom_id} → [dim]{out_path}[/dim]")
-
-    manifest["status"] = "completed"
-    manifest["fetched_at"] = datetime.now(ZoneInfo("UTC")).isoformat()
-    manifest["results"] = result_records
     manifest["image_usage"] = tracker.summary()
     manifest_in.write_text(
         yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),

@@ -8,11 +8,11 @@
 
 ## 現在地
 
-- **完了**: Step 1〜4, **Step 5 全部** (5a/5b/5c/5d + simplify), **Step 5e** (実装 + A/B 検証、本番採用見送り), **Step 6** (テンプレ化 + OpenAI 切替 + 構造刷新), **Step 6.5** (gpt-image-2 → 960x1280 本番採用、**W21 全 7 話で 7/7 完全一致を確証**), **Step 6.6** (Actions の batch 化 — 実装は Step 6.5 と一体で完了済み)、batch CLI、モデル別ガイダンス機構 (scenario / panel-prompt 両 LLM)、参考画像 LLM 告知配線
-- **次**: Step 7 (OSS 公開準備 — **生成物の別ブランチ分離 (gh-pages)** + fork 前提運用フロー記述 + private fork 作成 + Step 6.7 自動リトライ実装)
-- **ブロッカー**: なし
+- **完了**: Step 1〜4, **Step 5 全部** (5a/5b/5c/5d + simplify), **Step 5e** (実装 + A/B 検証、本番採用見送り), **Step 6** (テンプレ化 + OpenAI 切替 + 構造刷新), **Step 6.5** (gpt-image-2 → 960x1280 本番採用、**W21 全 7 話で 7/7 完全一致を確証**), **Step 6.6** (Actions の batch 化 — 実装は Step 6.5 と一体で完了済み), **Step 7a** (生成物の gh-pages 分離 — workflow を gh-pages worktree + symlink 経由に切替、main からランタイムを完全分離), **Step 7b** (`batch-resubmit-missing` CLI + manifest `retries[]` + daily-publish への best-effort step 配線、上限 2 回・prompt reuse、ローカル 5 ケース目視 OK), **Step 7c** (CONTRIBUTING.md 新規作成 — fork 運用前提 + 開発ルール明文化、README から「貢献」節経由でリンク)、batch CLI、モデル別ガイダンス機構 (scenario / panel-prompt 両 LLM)、参考画像 LLM 告知配線
+- **次**: **Step 7d** (ユニットテスト + CI lint) または **Step 7e** (README リライト + デモ画像) を選んで着手 — Step 7 全体は 7a〜7h に分割済み (下記セクション参照)
+- **ブロッカー**: Step 7a/7b の private fork 動作確認 (Step 7g 検証手順) は実環境がないと実施不可、コミット後に手動 dispatch で確認
 
-最終更新: 2026-05-10 (W21 全 7 話 batch で品質確証 — **完全一致 7/7 (100%) / 致命的 0/7 / 軽微 1/7**、Step 6.5 W19 の 6/7 を上回る。新ガイダンス + 960x1280 + 参考画像配線の 3 つの未確証懸案を一度にクリア。残作業は Step 6.7 (リトライ) と Step 7 (OSS 公開準備、gh-pages 分離))
+最終更新: 2026-05-10 (Step 7c 実装完了 — CONTRIBUTING.md 9 章構成で新規作成、Issue/PR テンプレは置かない方針、Code of Conduct は inline、README に「貢献」節を追加してリンク)
 
 ### Step 6.5 余波の検証ログ (2026-05-10 W21 batch で 3 件すべて確証済み)
 
@@ -358,7 +358,9 @@ yonkomatic batch-fetch-images --week 2026-W21
 
 **実運用検証の扱い**: 本来は live ブランチで 1 週間 cron 観察を予定していたが、live を 2026-05-10 に履歴ごと削除 + 新規作成したため運用パターンが定まっていない。実運用検証は Step 7 (OSS 公開準備) で運用ディレクトリ集約 + 利用者ブランチ運用の再設計と合わせて行う。
 
-### ⏳ Step 6.7 — batch 失敗時の自動リトライ (Step 6.6 の発展)
+### ✅ Step 6.7 — batch 失敗時の自動リトライ (Step 6.6 の発展) → **Step 7b として完了 (2026-05-10)**
+
+> **2026-05-10 完了**: 本 Step は Step 7 の **7b** として実装済み (下記 Step 7b セクション参照)。実装サマリ: `batch-resubmit-missing --week W` CLI 追加、manifest に `retries: [...]` 配列追記、`batch-fetch-images` が retries も poll、`daily-publish.yml` に best-effort step 追加。**未決事項の確定値**: 上限 2 回 / 配列追記方式 / 「pending かつ preflight 不在」を `state.history` × `_find_preflight_image` の AND で判定 (date 列挙はせず episode_number 基準、§Step 7b 設計判断 3 参照)。
 
 **背景**: Step 6.6 の cron 運用で batch が 24h 以内に完走しない / failed した場合に、人手介入なしで投稿を継続する。Step 6.5 の CLI (`batch-submit-images` / `batch-fetch-images`) は手動運用前提なので、自動リカバリパスを追加する。
 
@@ -382,22 +384,176 @@ yonkomatic batch-fetch-images --week 2026-W21
 - 再投入の上限回数 (失敗が続いた場合に sync 永続化に倒すか)
 - batch_id 履歴の管理形式 (manifest 内追記 vs 別ファイル)
 
-### ⏳ Step 7 — OSS 公開準備 (旧 Step 6)
+### ⏳ Step 7 — OSS 公開準備 (7a〜7h に分割)
 
-- **生成物の別ブランチ分離 (gh-pages)**: cron が生成する運用データ (`docs/`, `state/`, `scenarios/`, `output/archive/`, `output/preflight/`) を main から分離し、別ブランチ (gh-pages 等) に orphan push する。main はコード + ドキュメント + `content/` サンプルだけのクリーン状態を保つ。fork 利用者の `.gitignore` 緩和が不要になり、上流から fork への merge 衝突が起きない。GitHub Pages は gh-pages ブランチを直接 deploy 可能 ([deploy 設定変更で対応](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site))
-  - 影響範囲: `daily-publish.yml` / `weekly-scenarios.yml` の commit/push step を「main にはコード変更のみ commit」「gh-pages に生成物 orphan push」の二段に分割、`cli.py` の出力先パスは維持 (workflow 側で持ち回り)、`config.yaml` の `static_site.output_dir` も維持、README/SETUP/CLAUDE.md の運用記述を全面更新
-  - state.yaml の取り扱い: cron が gh-pages branch を `actions/checkout@v4` で `ref: gh-pages, path: .runtime/` のように別パスに sparse checkout → state を読み書き → 同じ path で push する流れ
-  - 既製 Action 候補: `peaceiris/actions-gh-pages`、または素朴に `git worktree add` + `git push origin gh-pages`
-  - 未決事項: gh-pages を 1 本でまとめるか、`gh-pages` (静的サイト用) と `run-data` (state/scenarios/archive 用) に分けるか — 後者なら GitHub Pages 公開対象が docs だけで済む
-- README に Quick Start + デモ画像
-- SETUP.md を fork / branch 戦略まで含めて拡充 (Default branch、Secrets、Workflow permissions、cron schedule の uncomment、`.gitattributes` の merge driver 登録)
-- ユニットテスト (API はモック)
-- GitHub Template Repository 設定
-- LICENSE / CONTRIBUTING.md
-- 自分の素材で稼働させた本番サンプルを README に掲載
-- **実運用検証 (Step 6.6 から繰越)**: ブランチ分離 + 利用者運用が確定したタイミングで cron を 1 週間観察し、preflight 利用率と batch 完走率を ROADMAP に記録
+**背景**: Step 7 は (a) gh-pages 分離、(b) Step 6.7 自動リトライ、(c) ドキュメント整備 (README/SETUP/CONTRIBUTING)、(d) ユニットテスト + CI、(e) private fork での 1 週間実運用検証、(f) Template Repository 化、と幅広いスコープを含む。1 セッションで一気にやると粒度過剰なので Step 4 (4a-4d) / Step 5 (5a-5e) に倣ってサブステップ分割する。
 
-完了条件: 第三者が README 通り 30 分以内で自分の漫画ボットを立ち上げられる。
+**完了条件**: 第三者が README 通り 30 分以内で自分の漫画ボットを立ち上げられる、かつ private fork で 1 週間 cron を観察して preflight 利用率と batch 完走率が記録されている状態。
+
+**着手順序と依存関係**:
+
+```
+7a (gh-pages 分離)              ← workflow と運用の根本変更。後続全部の前提
+  ├─ 7b (Step 6.7 自動リトライ)   ← 7a で manifest/preflight の置き場が gh-pages に確定後
+  ├─ 7c (CONTRIBUTING.md)         ← 軽量、7a と並行可
+  ├─ 7d (ユニットテスト + CI)     ← 7a/7b 実装が固まってから
+  ├─ 7e (README リライト + デモ)  ← 7a 後でないと Quick Start が嘘になる
+  ├─ 7f (SETUP.md 全面改訂)       ← 7a/7b 後でないと運用記述が古くなる
+  ├─ 7g (private fork 実運用検証) ← 7a/7b/7d/7f が揃ってから 1 週間観察
+  └─ 7h (Template Repository 化)  ← 全ドキュメント完成後に押すスイッチ
+```
+
+順序の根拠:
+- **7a が先頭**: workflow / `.gitignore` / ドキュメント全てに影響する根本変更。後続が「どの版」を書くかが 7a で確定する
+- **7g (検証) が末尾寄り**: 唯一の長尺 (1 週間)。7a/7b/7f が乗った workflow を観察対象にする
+- **7h を末尾**: Template Repository を先に押すと第三者が未完成版を踏む
+
+並行可能ペア: 7c + 7a, 7c + 7b, 7e + 7d (ファイル衝突しない)。
+
+#### ✅ Step 7a — 生成物の gh-pages 分離 (2026-05-10)
+
+**スコープ**: cron 生成物 (`docs/`, `state/`, `scenarios/`, `output/archive/`, `output/preflight/`) を main から外し、orphan branch `gh-pages` に push。main はコード + `content/` サンプル + ドキュメントのみのクリーン状態に。
+
+**完了条件**:
+- ✅ 両 workflow が `git worktree add .gh-pages gh-pages` で orphan branch をぶら下げ、root 直下に 4 本の symlink (`scenarios -> .gh-pages/scenarios` 等) を張ってから CLI を実行する流れで動く
+- ✅ `cli.py` 完全無改修。CLI は従来どおりリポジトリルート相対 (`Path("output/archive")` 等) で書き込み、symlink 経由で `.gh-pages/` に着地
+- ✅ main の `.gitignore` から `/scenarios/`, `/state/`, `/output/`, `/docs/*` を削除し、代わりに `/.gh-pages/` と末尾なしの `/scenarios` `/state` `/output` `/docs` (symlink も捕捉) に置換
+- ✅ ローカル `uv run ruff check src/` 緑、CLI 起動 OK。symlink 不在時はローカルでも従来どおり main ルート直下に書き込む (新 `.gitignore` で全部無視)
+- ⏳ private fork で workflow_dispatch 手動実行による gh-pages 初期化 → daily-publish 動作確認は **次セッションで実施** (Step 7g の検証手順の項目 1-5 に統合)
+
+**影響ファイル**: `.github/workflows/{weekly-scenarios,daily-publish}.yml`, `.gitignore`, `CLAUDE.md`
+
+**確定した方針** (実装時に決定):
+1. **実装手段**: **git worktree + ルート直下 symlink (案 A)** を採用。CLI / `./content` / `./config.yaml` の参照を一切いじらずに済む。`uv --project ..` のような cwd 操作も不要。
+2. **gh-pages 初期化**: workflow 内フォールバック方式。`git fetch origin gh-pages` の有無で分岐し、無ければ `index.html` プレースホルダ 1 個で orphan commit + push。手動 init は SETUP に書かない (Step 7f でローカル試運転モードのみ別記)。
+3. **state.yaml race**: gh-pages 側で `git pull --rebase --autostash origin gh-pages`。weekly と daily で書込先ファイルが実質分離されているため衝突確率は低い。`concurrency` group は **入れない** (Step 7g 観察で必要なら追加検討)。
+4. **既存 bot commit 履歴**: orphan で新規作成、`state.yaml` の history[] injection ロジックは workflow に書かない。既存 live 運用ユーザは Step 7g 検証手順書の任意手順として手動 put する。
+5. **`fetch-depth: 0`** 採用 (両 workflow): `git pull --rebase` が full clone を要求するため。週次 / 日次 cron 程度では overhead 無視可。
+6. **末尾なし `.gitignore` パターン**: `/scenarios` (末尾スラッシュなし) で「ファイル / ディレクトリ / symlink 全部」マッチさせる。`src/yonkomatic/state` は先頭 `/` がないため影響受けず。CLAUDE.md L74 に行儀の説明を追記。
+
+**未確認 (Step 7g に持越し)**: orphan 初期化時のフォールバック動作、両 workflow が緑になるか、main に generated 物が漏れていないか、preflight ヒット率 / batch 完走率の実測。
+
+#### ✅ Step 7b — Step 6.7 自動リトライ実装 (2026-05-10)
+
+**スコープ**: ROADMAP §Step 6.7 のスコープをそのまま実装。`batch-resubmit-missing --week W` CLI、manifest 拡張、`daily-publish.yml` への step 追加。
+
+**完了条件 (実装結果)**:
+- ✅ `uv run yonkomatic batch-resubmit-missing --week W`: pending (`state.history` 不在) かつ `_find_preflight_image` 不在の ep のみを抽出し、初回 prompt を reuse して新規 batch 投入。manifest の `retries: [...]` 配列に append
+- ✅ `batch-fetch-images` が main batch のポーリング後に `manifest["retries"]` を回って未完了の retry も poll → 完了したら preflight に書き出し manifest 更新 (シェアドヘルパ `_drain_batch_results` で result 書き出しを共用化)
+- ✅ `daily-publish.yml` の `Publish today's episode` 直後に `continue-on-error: true` で `batch-resubmit-missing` step を追加
+- ✅ `_load_batch_job_meta` / `_find_preflight_image` は **無改修** (top-level `jobs[]` から prompt メタを引け、preflight パスは固定 — 「複数 manifest 対応」は配列追記方式採用により不要に)
+- ✅ 既投稿エピソードは再投入されない (`state.history` × week filter で除外)
+- ✅ ローカル 5 ケース目視: (1) manifest 不在 → silent no-op、(2) main 未完了 → skip メッセージ、(3) cap reached (2/2) → warn + exit、(4) 全 published → "nothing to resubmit"、(5) ep5 preflight 存在 + ep1-4 published → "resubmitting 2 episode(s) (ep6, ep7) as retry #1 of 2" を確認 (実 API 投入は本番運用 / Step 7g に持越し)
+
+**影響ファイル**: `src/yonkomatic/cli.py` (`_drain_batch_results` 抽出、`batch-resubmit-missing` 新規、`batch-fetch-images` 拡張、`BatchStatus` import 追加), `.github/workflows/daily-publish.yml` (step 1 つ追加), `ROADMAP.md`
+
+**確定した方針** (実装時に決定):
+1. **manifest 構造**: **配列追記方式 (オプション A)** を採用。`state/batches/{week}.yaml` に `retries: [{batch_id, submitted_at, custom_ids, status, fetched_at, results}]` を append。1 ファイルで完結 = ファイル探索ロジック不要、glob 不要。
+2. **再投入の上限回数**: **上限 2 回 (`_MAX_BATCH_RETRIES = 2`)**。3 回目以降は warn ログ + exit 0、sync フォールバックに任せる
+3. **pending 判定**: ROADMAP 当初記述の「ISO week → 月〜日マッピング」は不要と判断。`publish-today` の現在の挙動 (`state.last_published_episode + 1`) は ep_n と weekday n が必ずしも一致しないため date 列挙は無意味。代わりに `state.history` 走査 (week 一致) × `_find_preflight_image` 不在の AND で判定
+4. **prompt は再生成しない**: 初回の `jobs[].rendered_image_prompt` をそのまま `BatchImageJob.prompt` に渡す。理由: (a) batch 失敗の大半は infra 起因 (expire / 一部 job の transient エラー)、(b) 再生成すると text LLM コストが乗る、(c) `_load_batch_job_meta` が読む archive 用 metadata が初回と一致して整合性が取れる
+5. **main batch 未完了時のガード**: `manifest.status != "completed"` のときは resubmit を実行しない (preflight が無いのは main がまだ走っているからで、二重投入になる)。`batch-fetch-images` が main を completed に更新した後の cron で初めて retry ロジックが起動する
+
+#### ✅ Step 7c — CONTRIBUTING.md 新規作成 (2026-05-10)
+
+**スコープ**: 現状不在の `CONTRIBUTING.md` を新規作成。fork 前提運用 + 上流 PR 流儀 + 開発ルール (uv / ruff / commit メッセージ規約 / Co-Authored-By 禁止) を明文化。
+
+**実装サマリ**:
+- `CONTRIBUTING.md` を 9 章で新規作成: (1) 位置付けと貢献の範囲、(2) 開発環境 (uv)、(3) Lint (`uv run ruff check src/`)、(4) テスト (Step 7d 完了後追記の placeholder + 既存 `test slack/panel` 案内)、(5) コーディング規約 (CLAUDE.md からの噛み砕き)、(6) コミットメッセージ規約 (Conventional Commits 風 + Co-Authored-By 禁止再掲)、(7) PR 流儀 (説明テンプレ・lint 緑前提)、(8) Issue/Discussions (バグ報告のみ受付)、(9) ライセンスと行動規範 (MIT + Contributor Covenant 相当を inline)
+- README.md の「ライセンス」直前に「貢献」節を追加 (1 段落、CONTRIBUTING へのリンク)
+
+**確定した未決事項**:
+1. Issue / PR テンプレート → **置かない** (テンプレ専用リポなので Issue 流入を絞る)
+2. Code of conduct → **CONTRIBUTING.md に inline** (別ファイルにしない)
+3. テスト実行手順 → **placeholder のみ** (Step 7d 完了後に追記)
+4. PR 流儀の温度感 → **基本ルール中心** (ROADMAP 更新義務は contributor に課さない、メンテナ向け規約は CLAUDE.md 既載)
+5. Issue 方針 → **再現性あるバグのみ**、機能要望/質問/運用相談は Discussions
+
+**影響ファイル**: `CONTRIBUTING.md` (新規), `README.md`
+
+#### ⏳ Step 7d — ユニットテスト + CI lint (1 セッション)
+
+**スコープ**: 現状空の `tests/` に pytest ベースのテスト。OpenAI / Slack はモック化。`.github/workflows/ci.yml` で `ruff check` + `pytest` を PR 時に走らせる。
+
+**完了条件**:
+- 最低限のテスト群:
+  - `test_scenario_schema.py` — `ScenarioWeek` / `ScenarioEpisode` / `Dialogue` の Pydantic validate 境界
+  - `test_state_repo.py` — `StateStore` の atomic write / append / round-trip
+  - `test_panel_description.py` — `build_image_prompt` の組み立て (OpenAI モック)
+  - `test_news_fetcher.py` — feedparser モック、feed 単位の例外吸収
+  - `test_publisher_static_site.py` — Jinja2 出力の HTML 構造
+  - `test_batch_manifest.py` — `_load_batch_job_meta` / `_find_preflight_image` の 7b リトライ対応含む
+- `pyproject.toml` の `[dependency-groups]` に `dev` group + pytest
+- `.github/workflows/ci.yml` 新設 (PR + push 両 trigger、`uv run ruff check src/ tests/` + `uv run pytest`)
+- ローカル `uv run pytest` が緑
+
+**影響ファイル**: `tests/__init__.py`, `tests/test_*.py` (6 本前後), `pyproject.toml`, `.github/workflows/ci.yml`, `CONTRIBUTING.md` (テスト実行手順追記)
+
+**未決事項**:
+1. coverage 計測 → **推奨: 初版では測らない** (緑/赤判定だけで十分)
+2. integration テスト (実 API) → **推奨: 置かない** (`uv run yonkomatic test panel/slack/news` が手動 integration として既存)
+
+#### ⏳ Step 7e — README リライト + Quick Start + デモ画像 (0.5 セッション)
+
+**スコープ**: README に Quick Start (5 分動作) + 自分の素材で稼働させた本番サンプル画像 1 枚 + デモ用 GitHub Pages の URL。
+
+**完了条件**:
+- 章立て: Quick Start / Demo / How it works (1 分) / リンク集
+- 本番サンプル画像 1 枚を `assets/demo/` に配置 (W21 ep4 or ep5 推奨)
+- README からの SETUP / CONTRIBUTING / ROADMAP / SPEC / LICENSE リンク
+- Status 行は 7g 完了後に「Step 7 完了」に書き換え (暫定で残す)
+
+**影響ファイル**: `README.md`, `assets/demo/*.png` (新規)
+
+**未決事項**:
+1. デモ画像の話 → **推奨: W21 ep5 (傘の待機列) or ep4 (静かな通知音)** (SFX + dialogue 両立)
+2. Demo URL → **推奨: `https://jumboly.github.io/yonkomatic/`** (上流テンプレでは動かないが fork 後の同等 URL 例として併記)
+
+#### ⏳ Step 7f — SETUP.md 全面改訂 (0.5〜1 セッション)
+
+**スコープ**: 7a で `.gitignore` 緩和が不要になった反映 + 7b のリトライ運用 + GitHub Pages の deploy 設定追加 + `.gitattributes` merge driver 登録手順 (既存 §11 の補強)。
+
+**完了条件**:
+- 旧 §7 「.gitignore を緩和」を **削除** (7a で main に運用パターンが書かれない前提)
+- 新節「GitHub Pages の deploy source 設定」追加 (`Deploy from a branch: gh-pages /(root)`)
+- 新節「batch リトライの自動化 (Step 6.7)」追加 — failed/expired 時の挙動説明
+- §0 前提に **「fork は private 必須」** を強調
+- §11 上流取り込みに「初回 1 度だけ `git config --add merge.ours.driver true` を fork で実行」
+- §6 Workflow permissions の文言を gh-pages 体制に整合化 (push 先が gh-pages branch であることを明記)
+- 全章で「branch 戦略」記述を 1 箇所に集約
+
+**影響ファイル**: `SETUP.md`, `CLAUDE.md` (必要なら 1〜2 行同期)
+
+#### ⏳ Step 7g — private fork 実運用検証 (1 週間観察、Step 6.6 から繰越)
+
+**スコープ**: 7a/7b/7d/7f の成果が乗った main を private fork (例: `jumboly/yonkomatic-mine`) に取り込み、cron を有効化して 1 週間放置。preflight 利用率と batch 完走率を ROADMAP に記録。
+
+**完了条件**:
+- private fork で 7 日連続 daily-publish が緑 (Slack 投稿成功 + gh-pages push 成功)
+- 期間中に最低 1 回 weekly-scenarios cron が走り gh-pages に scenarios + batch manifest が積まれる
+- preflight 利用率 (= 7 話中、preflight ヒットした話数) を ROADMAP に記録 (期待値 7/7、batch 不調なら 5〜6/7)
+- batch 完走率 (= 完走した batch / 投入した batch) を記録
+- 7b のリトライが発火する障害ケースが観察できた場合、原因と挙動を Decisions Log に追記
+- README の Status 行を「Step 7 完了」に書き換え + デモ URL を fork 先 (or 公開可能な範囲で) に更新
+
+**影響ファイル**: `ROADMAP.md` (現在地 / Step 6.6 / Step 7 / Decisions Log), `README.md` (Status)
+
+**未決事項**:
+1. 観察中に Step 7 修正が必要になった場合の扱い → **推奨: 致命的でなければ観察継続、致命的なら仕切り直し**
+2. cron 観察ログ → **推奨: `tmp/step7-live-log.md` に手書きメモ、ROADMAP には要点のみ転記**
+
+#### ⏳ Step 7h — GitHub Template Repository 化 (0.1 セッション、儀式的)
+
+**スコープ**: `gh repo edit jumboly/yonkomatic --template` で Template Repository 化、リポジトリ description / topics を OSS 向けに整える。
+
+**完了条件**:
+- GitHub UI のリポジトリ右上に「Use this template」ボタンが出る
+- description / topics (`yonkoma`, `manga`, `openai`, `slack-bot`, `github-actions`, `template`) が設定されている
+- README に「Use this template ボタンから始められる」一文を追加 (SETUP の fork 手順と併存)
+
+**影響ファイル**: README の 1 行追記、リポジトリ設定 (UI/CLI)
+
+**未決事項**: なし (儀式的)
 
 ---
 
@@ -405,6 +561,10 @@ yonkomatic batch-fetch-images --week 2026-W21
 
 新しい決定が出たら頭に追加。古いものは削除せず残す。
 
+- **2026-05-10 (Step 7c 実装完了)** `CONTRIBUTING.md` を新規作成し、上流テンプレへの貢献ガイドを明文化。**確定した方針**: (1) **9 章構成** = 位置付けと貢献の範囲 / 開発環境 (uv) / Lint (`uv run ruff check src/`) / テスト (Step 7d 完了後追記の placeholder + 既存 `test slack/panel` を手動 integration として案内) / コーディング規約 (CLAUDE.md からの噛み砕き — WHY のみコメント / Step 番号は code に書かない / `typer.Exit` / `_fail_on` / `PublishResult(ok=False)`) / コミットメッセージ規約 (Conventional Commits 風 + **Co-Authored-By 禁止** を再掲、出典 §2026-05-08) / PR 流儀 (説明テンプレ「何を / なぜ / 動作確認」、lint 緑前提、レビュアー指名不要) / Issue & Discussions (バグのみ Issue、要望・質問は Discussions) / ライセンスと行動規範 (MIT + Contributor Covenant 相当を inline)、(2) **Issue / PR テンプレートは置かない** (テンプレ専用リポゆえ流入を絞る)、(3) **Code of Conduct は inline** (別ファイル化しない)、(4) **PR 流儀は contributor 向け基本ルールのみ** (ROADMAP/SPEC 更新義務は課さない、メンテナ向け規約は CLAUDE.md 既載)、(5) **Issue は再現性あるバグのみ受付**。`README.md` の「ライセンス」直前に「貢献」節 (CONTRIBUTING へのリンク 1 段落) を追加。新規 / 改修ファイルは `CONTRIBUTING.md` (新規) と `README.md` のみ、Python コード変更なし、`uv run ruff check src/` 緑。
+- **2026-05-10 (Step 7b 実装完了)** OpenAI image batch の自動リトライパスを実装。`batch-resubmit-missing --week W` CLI を新規追加 (`cli.py` `batch-submit-images` の上)、`batch-fetch-images` を retries 併用ポーリングに拡張、`daily-publish.yml` の `Publish today's episode` 直後に `continue-on-error: true` で best-effort step を挿入。**確定した設計判断**: (1) **manifest 構造は配列追記方式**: 既存 `state/batches/{week}.yaml` に `retries: [{batch_id, submitted_at, custom_ids, status, fetched_at, results}]` を append (オプション B のバージョン分割は採らず、1 ファイル完結で flatten 1 段)、(2) **prompt は再生成しない**: 初回の `jobs[].rendered_image_prompt` を reuse して `BatchImageJob` を作る (text LLM コスト追加なし、archive metadata 整合)、(3) **上限 2 回 (`_MAX_BATCH_RETRIES = 2`)**: 3 回目以降は warn + exit 0 で sync フォールバックに任せる、(4) **pending 判定は episode_number 基準** (date 列挙はしない): `state.history` × week filter で published 集合を作り、`_find_preflight_image` 不在の AND で pending を抽出。`publish-today` の挙動 (`state.last_published_episode + 1`) は ep_n と weekday n が一致しないため date マッピングは無意味と判断、(5) **main 未完了時のガード**: `manifest.status != "completed"` のときは exec せず `batch-fetch-images` が main を completed にした次回 cron まで待つ (二重投入防止)、(6) **`_drain_batch_results` ヘルパ抽出**: `batch-fetch-images` の result-saving loop を関数化、初回 batch と retry batch で同じ schema を manifest に書く。`_load_batch_job_meta` / `_find_preflight_image` は無改修 (top-level `jobs[]` から prompt メタが引け、preflight パスは固定。配列追記方式採用により「複数 manifest 対応」の必要が消えた)。**ローカル 5 ケース目視 OK**: (a) manifest 不在 → silent no-op、(b) main 未完了 → skip、(c) cap reached (2/2) → warn、(d) 全 published → "nothing to resubmit"、(e) ep5 preflight 存在 + ep1-4 published → "resubmitting 2 episode(s) (ep6, ep7) as retry #1 of 2" (実 API 投入は本番 / Step 7g に持越し)。`uv run ruff check src/` 緑。
+- **2026-05-10 (Step 7a 実装完了)** cron 生成物 (`scenarios/`, `state/`, `output/`, `docs/`) を main から完全分離し、orphan branch `gh-pages` に push する体制に切替。**実装手段は案 A: git worktree + ルート直下 symlink** を採用 (案 B working-directory 切替は `uv --project ..` 検証コストで却下、案 C `--data-root` flag は ROADMAP 完了条件 2 「Python 側に gh-pages の概念を漏らさない」原則違反で却下)。両 workflow に `Prepare gh-pages worktree` step を追加: `git fetch origin gh-pages` の有無で分岐し、無ければ `index.html` プレースホルダ 1 個で orphan commit + push (= フォークでの初回 dispatch で自動初期化、SETUP に手動 init 手順は書かない方針)。続く `Wire runtime symlinks` step で `scenarios -> .gh-pages/scenarios` 等を root 直下に張り、CLI は完全無改修で symlink 経由 `.gh-pages/` に書き込む。bot commit/push は `cd .gh-pages && git push origin gh-pages`、`pull --rebase --autostash` で weekly+daily の race を吸収 (`concurrency` group は Step 7g 観察で必要なら追加検討、今は入れない)。`fetch-depth: 0` を両 workflow に追加 (rebase に full clone が要る)。`.gitignore` は旧運用パターン 8 行削除 + `/.gh-pages/` と末尾なしの `/scenarios` `/state` `/output` `/docs` (symlink 捕捉) 追加。CLAUDE.md に「CI 上の出力 (gh-pages worktree)」節追加 + L74 末尾スラッシュ挙動の説明補強。**ローカル開発は symlink 不在のままで従来動作維持** (root 直下に書き込まれるが `.gitignore` が全部無視するため `git status` を汚さない)。**未確認**: private fork での workflow_dispatch 動作確認は Step 7g 検証手順 1-5 に統合 (本セッションでは git 環境がないため未実施)。
+- **2026-05-10 (Step 7 サブステップ分割確定)** Step 7 (OSS 公開準備) を **7a〜7h の 8 サブステップ** に分割し、着手順序と各サブステップの完了条件・影響ファイル・未決事項を ROADMAP §Step 7 に明文化。Step 4/5 と同じ粒度 (1 セッション = 1 commit + ROADMAP 更新) に揃えた。順序: 7a (gh-pages 分離) → 7b (Step 6.7 自動リトライ) / 7c (CONTRIBUTING.md) / 7d (ユニットテスト + CI) / 7e (README リライト + デモ) / 7f (SETUP.md 全面改訂) → 7g (private fork で 1 週間観察) → 7h (Template Repository 化)。**gh-pages は 1 本に統合**することで確定 (`run-data` 別建てはしない、Pages 公開対象は `gh-pages /(root)`)。実装手段は **`git worktree` 直書きを推奨** (Action 依存ゼロ)。manifest 構造は **`retries: [...]` 配列追記方式を推奨** (1 manifest = 1 週で flatten 1 段)。再投入の上限は **2 回** (3 回目以降は sync フォールバックのみ)。Step 6.7 セクション (L361-) は本サブステップ計画への pointer を残しつつ既存スコープ記述を維持 (= 7b の参照元)。
 - **2026-05-10 (W21 全 7 話 batch で 7/7 完全一致を確証 — 3 件の懸案を一括クリア)** scenarios/2026-W21 全 7 話を `batch-submit-images` → `batch-fetch-images` で生成 (実コスト $0.6102、submit から完了観測まで約 11 分 22 秒)。preflight 7 枚を Read で目視確認した結果、**完全一致 7/7 (100%) / 致命的 0/7 / 軽微 1/7 (ep3 で dialogue が鉤括弧付き吹出装飾)**。Step 6.5 W19 の 6/7 を上回る品質。これにより Step 6.5 余波の 3 懸案を一度に確証: **(1) 新ガイダンス (Verbatim キャラ anchor / SFX 指示 / Sequential panel labels / Literal text in double quotes / Negative constraints 末尾集約) の効果 — ep1/ep5 の 2 サンプルから 7 サンプル完走へ**、**(2) 960x1280 サイズで W19 並み以上の品質を実証 (1536x2048 比 -33% コスト)**、**(3) 参考画像の reference_images_block 配線が実 batch 経由で機能 (キャラ造形が全話で一貫、ヨンコの黒髪ボブ+丸眼鏡+白セーター+藍オーバーオール、マチカの茶髪ポニテ+赤パーカ)**。dialogue 56/56 一字一句一致、SFX 7 種 (「さらっ」「ぴらっ」「ひや〜」「しーん」「ゴトン…」「ピッ/ぴっ…」「ぽつ」) 全描画。本番運用の品質基準としてこの構成 (gpt-image-2 + 960x1280 + 新ガイダンス + 参考画像配線 + batch) を確定。
 - **2026-05-10 (test-slack workflow で動作確認成功)** Step 7 着手前のテンプレ品質確認として `gh workflow run test-slack.yml -R jumboly/yonkomatic` を 1 回 trigger (`run 25623050101`)、11 秒で緑、Slack に test 画像投稿成功。workflow_dispatch / Secrets (SLACK_BOT_TOKEN + SLACK_CHANNEL_ID) / `uv sync --frozen` / `yonkomatic test slack` コマンドの経路すべて健全。Annotations に Node.js 20 deprecation 警告と GitHub のキャッシュサービス一時障害 (test 本体には影響なし) が出ているが、後者は GitHub 側、前者は別途対応 (下記 Gotchas)。weekly-scenarios / daily-publish の本格動作確認は Step 7 (gh-pages 分離) 後。
 - **2026-05-10 (Step 7 のスコープを「運用ディレクトリ集約」→「生成物の別ブランチ分離 (gh-pages)」に置換)** 当初案では `scenarios/state/output/docs` を 1 ディレクトリ (`runtime/` 等) に集約する計画だったが、それより一歩進んで **main = コードのみ、生成物は gh-pages 等の別ブランチに orphan push** する方針に切替。理由: (a) main の diff が cron 生成物で汚れず上流追従が綺麗、(b) fork 利用者の `.gitignore` 緩和が不要になる (生成物は別ブランチに行くため)、(c) GitHub Pages は gh-pages ブランチを直接公式 deploy 対象にできる。トレードオフは workflow が二段階 commit (main にコード / gh-pages に生成物) になる複雑度だが、`peaceiris/actions-gh-pages` 等の既製 Action で吸収可能。state.yaml は workflow が gh-pages を sparse checkout → 読み書き → push する形にする。1 ブランチ (gh-pages) でまとめるか、static-site 用 (`gh-pages`) と運用データ用 (`run-data`) に分けるかは Step 7 着手時に確定。

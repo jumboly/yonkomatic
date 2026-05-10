@@ -100,6 +100,22 @@ jobs:
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
         run: uv run yonkomatic publish-today
 
+      # Why best-effort and post-publish: if the weekly batch had partial
+      # failures (or expired), this reissues missing episodes as a new
+      # batch so subsequent days can use preflight again. Capped at 2
+      # retries per week inside the CLI; sync fallback covers anything
+      # past that. Idempotent: a no-op when nothing is pending.
+      - name: Resubmit missing batch jobs (best-effort)
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -e "state/batches/${{ steps.week.outputs.value }}.yaml" ]; then
+            uv run yonkomatic batch-resubmit-missing --week "${{ steps.week.outputs.value }}"
+          else
+            echo "no batch manifest for ${{ steps.week.outputs.value }}; nothing to resubmit"
+          fi
+
       - name: Commit and push to gh-pages
         if: always()
         run: |
