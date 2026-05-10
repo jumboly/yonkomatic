@@ -2,20 +2,24 @@
 
 content:
   base_dir: ./content
-  characters_dir: characters
-  world_dir: world
-  samples_dir: samples
-  themes_dir: themes
+  prompt_filename: prompt.md
+  images_dir: images
+  # 1 回の生成で AI に渡す参考画像の上限。超過時は sorted 順で先頭 N 枚に切り捨て (warn ログ出力)。
+  max_images: 10
 
 ai:
-  scenario_model: claude-sonnet-4-6
-  # Pro モデル (gemini-3-pro-image-preview) に差し替えるとテキスト描画品質が
-  # 上がる可能性がある (text_rendering.mode = model_render と組み合わせて検証)。
-  image_model: gemini-3.1-flash-image-preview
-  # 開発・テスト時は 1K 推奨 (生成が速く安価)。本番運用で品質が必要になったら 2K へ。
-  image_size: "1K" # 512 | 1K | 2K | 4K
-  aspect_ratio: "3:4" # 縦長4コマ
+  # OpenAI Chat Completions / Structured Output に使うテキストモデル。
+  # 上位品質: gpt-5.5 / 軽量: gpt-5.4-mini に変更可。
+  text_model: "gpt-5.4"
+  # OpenAI Image Generation モデル。最新 / 高品質を狙うなら gpt-image-2 に。
+  image_model: "gpt-image-1"
+  # OpenAI 画像 API は px サイズ指定 ("1024x1024" / "1024x1536" / "1536x1024")。
+  # 1024x1536 が縦長 3:4 (4 コマ漫画) のネイティブサイズ。
+  image_size: "1024x1536"
+  # 表示用の比率記述。API には image_size 経由で渡る。
+  aspect_ratio: "3:4"
   max_image_retries: 3
+  openai_api_key_env: OPENAI_API_KEY
 
 publishers:
   slack:
@@ -48,15 +52,3 @@ news:
   max_items_per_feed: 10
   lookback_days: 7
   language: ja
-
-text_rendering:
-  # pil_overlay: Gemini に吹き出し・テキストを描かせず、PIL で日本語を後段
-  # オーバーレイする。下位モデル (Flash 系) でも誤字なく日本語が出せる確実
-  # 路線。利用前に `uv run python scripts/install_fonts.py` で Noto Sans JP
-  # を取得すること。
-  # model_render: 画像モデル自身に吹き出し+日本語を描かせ、PIL オーバーレイ
-  # をスキップ。日本語を綺麗に描けるモデル (gemini-3-pro-image-preview 等)
-  # でのみ実用。CLI の `--text-mode model_render` で都度 A/B 検証できる。
-  mode: pil_overlay # pil_overlay | model_render
-  font_path: ./assets/fonts/NotoSansJP-Regular.otf
-  bubble_style: round # round | rectangle | cloud (kind="speech" のみに適用)

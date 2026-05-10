@@ -1,6 +1,6 @@
 """Persistent state for what has already been published.
 
-``state/state.json`` is the single source of truth for "did we already
+``state/state.yaml`` is the single source of truth for "did we already
 post episode N today?". The format is intentionally small so a human
 operator can fix it by hand if the cron job goes off the rails.
 
@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import yaml
 from pydantic import BaseModel, Field
 
 
@@ -41,14 +42,19 @@ class StateStore:
     def load(self) -> StateData:
         if not self.path.exists():
             return StateData()
-        return StateData.model_validate_json(self.path.read_text(encoding="utf-8"))
+        raw = yaml.safe_load(self.path.read_text(encoding="utf-8")) or {}
+        return StateData.model_validate(raw)
 
     def save(self, data: StateData) -> None:
         # atomic write: write to a sibling temp file, then rename. Why: a
-        # crash mid-write would otherwise leave state.json half-empty and
+        # crash mid-write would otherwise leave state.yaml half-empty and
         # break the next run's load().
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = data.model_dump_json(indent=2) + "\n"
+        payload = yaml.safe_dump(
+            data.model_dump(mode="json"),
+            allow_unicode=True,
+            sort_keys=False,
+        )
         fd, tmp_name = tempfile.mkstemp(
             prefix=f".{self.path.name}.", dir=str(self.path.parent)
         )
@@ -70,7 +76,7 @@ class StateStore:
         return data
 
     def auto_commit(self, message: str, *, paths: list[Path] | None = None) -> bool:
-        """Stage state.json (and given paths) and commit. Returns True on success.
+        """Stage state.yaml (and given paths) and commit. Returns True on success.
 
         Why no exception: the daily cron should never abort over a commit
         failure — the publish itself already happened. Caller logs the

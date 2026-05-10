@@ -16,19 +16,13 @@ uv sync                            # 依存関係インストール
 uv run yonkomatic --help           # CLI 確認
 uv run yonkomatic version
 
-# 動作確認 (Step 1)
+# 動作確認
 uv run yonkomatic test slack       # Slack 疎通 (.env に SLACK_BOT_TOKEN/CHANNEL_ID 必要)
-
-# 動作確認 (Step 2)
-uv run yonkomatic test gemini --prompt "<具体的な画像描写>"  # Gemini 単体
-uv run yonkomatic test panel       # シナリオ → Claude プロンプト → Gemini 画像
+uv run yonkomatic test image --prompt "<具体的な画像描写>"  # OpenAI 画像生成単体
+uv run yonkomatic test panel       # シナリオ → text LLM プロンプト → 画像生成
 
 # Lint
 uv run ruff check src/
-
-# 設定だけ差し替えたい時 (例: 1K → 2K)
-sed 's/image_size: "1K"/image_size: "2K"/' config.yaml > /tmp/cfg.yaml
-uv run yonkomatic test panel --config /tmp/cfg.yaml
 ```
 
 `output/`, `scenarios/`, `state/` は `.gitignore` 済み (利用者ブランチでのみ commit される)。テストの生成物は気にせず置いてよい。
@@ -38,26 +32,26 @@ uv run yonkomatic test panel --config /tmp/cfg.yaml
 ### パイプライン (1 エピソードあたり)
 
 ```
-ScenarioEpisode (JSON)
-   ↓ Stage 1: panel/description.py — Claude にプロンプト生成を依頼
+ScenarioEpisode (YAML)
+   ↓ Stage 1: panel/description.py — text LLM (gpt-5.4) に panel_prompt.md を展開して投入
 英語の統合画像プロンプト
-   ↓ Stage 2: ai/gemini_client.py — Gemini で 1 枚生成
+   ↓ Stage 2: ai/openai_client.py — gpt-image-1 で 1 枚生成 (refs があれば images.edit)
 4 コマ画像 (PNG/JPEG)
-   ↓ Stage 3+: panel/composer.py + validator.py (Step 3 で実装)
    ↓ Stage 5:  publisher/* — 全 enabled Publisher に並列投稿
 PublishResult[]
 ```
 
-週次でシナリオを Claude が 7 話分一括生成 (Step 4)、日次でその週の今日のエピソードを取り出して上記パイプラインに流す。
+週次で Stage 0 (`scenario/generator.py` + `scenario_prompt.md`) を Structured Output 経由で叩いて `scenarios/{week}.yaml` を生成、日次でその週の今日のエピソードを取り出して上記パイプラインに流す。
 
 ### 抽象化のレイヤ
 
 - **`Publisher` Protocol** (`publisher/base.py`): Slack / Discord / 静的サイトを同一 Protocol で扱う。`publish(episode, image_path) → PublishResult`。失敗は **例外送出ではなく `PublishResult(ok=False)`** にする (1 つの Publisher の障害が他に波及しない設計)。
-- **AI クライアント** (`ai/claude_client.py`, `ai/gemini_client.py`): SDK 仕様変更を 1 箇所に閉じる薄いラッパ。リトライポリシも内蔵。
+- **AI クライアント** (`ai/openai_client.py`): OpenAI SDK の薄いラッパ。テキスト complete + Structured Output (`beta.chat.completions.parse`) + 画像生成 (`images.generate` / `images.edit`) を 1 クラスに統合。リトライポリシ内蔵。
+- **テンプレート機構** (`template/render.py`, `templates/*.md`): プロンプトテキストはコードから外出しした YAML frontmatter 付き Markdown ファイル。`{{var}}` 単純置換。利用者は `content/` に同名ファイルを置けば上書き可能 (フォールバック方式)。
 
 ### 設定駆動の env var 解決
 
-API キーやチャンネル ID 等の機密値は **設定オブジェクトには入れない**。`config.yaml` には env var **名前** だけを書き (`token_env: SLACK_BOT_TOKEN` のように)、呼び出し側 (CLI の `_require_env`) で `os.environ` から読む。
+API キーやチャンネル ID 等の機密値は **設定オブジェクトには入れない**。`config.yaml` には env var **名前** だけを書き (`token_env: SLACK_BOT_TOKEN`, `openai_api_key_env: OPENAI_API_KEY` のように)、呼び出し側 (CLI の `_require_env`) で `os.environ` から読む。
 
 これにより:
 - Publisher / AI Client は `api_key: str` / `token: str` を必須引数で受ける (env への副作用なし、テストしやすい)
@@ -65,14 +59,16 @@ API キーやチャンネル ID 等の機密値は **設定オブジェクトに
 
 ### `content/` 駆動設定
 
-`ContentConfig` の `characters_dir` / `world_dir` 等は subdir 名を制御する。`ContentPack.from_dir(base, content_cfg=cfg.content)` のようにコンフィグを渡すこと。**ハードコードしない**。
+`ContentConfig` の `prompt_filename` / `images_dir` は `prompt.md` と `images/` の名前を制御する。`ContentPack.from_dir(base, content_cfg=cfg.content)` のようにコンフィグを渡すこと。**ハードコードしない**。
+
+`images/` は再帰 glob で全画像を集める (サブディレクトリ・ファイル名自由、拡張子 `.png/.jpg/.jpeg/.webp`)。順序を制御したければ `01-...` のような numeric prefix を使う (sorted で安定順)。`max_images` を超えたら warn ログを出して先頭 N 枚に切り捨て。
 
 ## 利用者ブランチ vs main の境界
 
 このリポジトリは **OSS テンプレート**。main には:
 
-- ✅ フレームワークコード、`examples/minimal/` テキストのみのサンプル、ドキュメント、ワークフロー定義
-- ❌ 実キャラ素材、API キー、AI 生成された参照画像 (ライセンス曖昧)、`scenarios/` `output/` `state/` の実データ
+- ✅ フレームワークコード、`examples/minimal/` のテキストのみのサンプル、ドキュメント、ワークフロー定義
+- ❌ 実キャラ素材、API キー、生成された参照画像 (ライセンス曖昧)、`scenarios/` `output/` `state/` の実データ
 
 `.gitignore` の `/scenarios/`, `/output/`, `/state/` は **先頭 `/` 必須**。`state/` だけだと `src/yonkomatic/state/` まで巻き込んでしまう。
 
@@ -82,11 +78,11 @@ API キーやチャンネル ID 等の機密値は **設定オブジェクトに
 - **`raise typer.Exit(code=N)`** で CLI を終了する。`sys.exit` は混ぜない。
 - **`try/except + メッセージ + Exit`** の繰り返しは `_fail_on(action)` コンテキストマネージャで集約する (`cli.py`)。
 - **`Co-Authored-By: Claude ...`** 行は **付けない**。コミット hook が捏造判定で拒否する (2026-05-08 時点)。
-- **`google-genai` の retry**: サーバが返す `retryDelay` を honor する (`_extract_retry_delay`)。固定 backoff だけにしない。
+- **OpenAI のリトライ**: `RateLimitError` と 5xx `APIError` で指数 backoff 再試行 (最大 60s cap)。それ以外の 4xx は即時 raise (修正不能なため)。
 
 ## 開発時の AI 利用は軽めに
 
-`config.yaml` のデフォルトは **`image_size: 1K`** (本番品質確認時のみ 2K)。テスト中の生成は速度・コストを優先する。Anthropic console の **Settings → Limits** で月次 spend limit を設定推奨。
+`config.yaml` のデフォルトは **`image_model: gpt-image-1`** (本番品質を狙うときは `gpt-image-2` に切替)。テスト中の生成は速度・コストを優先する。OpenAI dashboard の **Settings → Billing** で月次 spend limit を設定推奨。
 
 ## 段階的実装の進め方
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import importlib.resources as resources
 import mimetypes
 import os
 import tempfile
@@ -17,23 +17,27 @@ from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
 import typer
+import yaml
 from PIL import Image, ImageDraw, ImageFont
+from pydantic import BaseModel
 from rich.console import Console
 
 from yonkomatic import __version__
-from yonkomatic.ai.claude_client import ClaudeClient
-from yonkomatic.ai.gemini_client import GeminiImageClient, GeminiImageResult
-from yonkomatic.config import Config, TextRenderMode, load_config
+from yonkomatic.ai.openai_client import ImageResult, OpenAIClient
+from yonkomatic.config import Config, load_config
 from yonkomatic.news.fetcher import fetch_recent_headlines
-from yonkomatic.panel.composer import compose
-from yonkomatic.panel.description import ContentPack, build_image_prompt
-from yonkomatic.panel.validator import ValidationResult, validate
+from yonkomatic.panel.description import (
+    ContentPack,
+    build_image_prompt,
+    resolve_template_path,
+)
 from yonkomatic.publisher.base import Episode, Publisher, PublishResult
 from yonkomatic.publisher.slack import SlackPublisher
 from yonkomatic.publisher.static_site import StaticSitePublisher
 from yonkomatic.scenario.generator import generate_week
 from yonkomatic.scenario.schema import ScenarioEpisode, ScenarioWeek
 from yonkomatic.state.repo import HistoryEntry, StateStore
+from yonkomatic.template import RenderedPrompt
 
 app = typer.Typer(
     name="yonkomatic",
@@ -45,6 +49,17 @@ app.add_typer(test_app, name="test")
 
 console = Console()
 err_console = Console(stderr=True)
+
+# Built-in default templates bundled with the package; users can override
+# by dropping a same-named file under content/.
+_TEMPLATES_PACKAGE = "yonkomatic.templates"
+_SCENARIO_TEMPLATE_FILENAME = "scenario_prompt.md"
+_PANEL_TEMPLATE_FILENAME = "panel_prompt.md"
+
+def _load_yaml_model[M: BaseModel](path: Path, model: type[M]) -> M:
+    """Read a YAML file and validate it against the given Pydantic model."""
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return model.model_validate(raw)
 
 
 @app.command()
@@ -74,18 +89,25 @@ def _require_env(name: str, *, hint: str = "") -> str:
     return value
 
 
-TextModeOption = Annotated[
-    TextRenderMode | None,
-    typer.Option(
-        "--text-mode",
-        help="Override text_rendering.mode for this run (pil_overlay | model_render).",
-    ),
-]
+def _builtin_templates_dir() -> Path:
+    """Path to the bundled templates inside the installed package."""
+    # importlib.resources.files returns a Traversable; in the typical
+    # installed/editable layout this is a real filesystem path.
+    return Path(str(resources.files(_TEMPLATES_PACKAGE)))
+
+
 ImageModelOption = Annotated[
     str | None,
     typer.Option(
         "--image-model",
-        help="Override ai.image_model for this run (e.g. gemini-3-pro-image-preview).",
+        help="Override ai.image_model for this run (e.g. gpt-image-2).",
+    ),
+]
+TextModelOption = Annotated[
+    str | None,
+    typer.Option(
+        "--text-model",
+        help="Override ai.text_model for this run (e.g. gpt-5.5).",
     ),
 ]
 
@@ -93,31 +115,27 @@ ImageModelOption = Annotated[
 def _apply_cli_overrides(
     cfg: Config,
     *,
-    text_mode: TextRenderMode | None = None,
+    text_model: str | None = None,
     image_model: str | None = None,
 ) -> Config:
-    """Merge CLI flag overrides into cfg via sub-model copy.
-
-    Lets operators A/B test ``text_rendering.mode`` (pil_overlay vs
-    model_render) and ``ai.image_model`` without editing config.yaml.
-    text_mode is already a typer-validated Literal; image_model is
-    free-form (the SDK rejects unknown ids), so no Pydantic re-validation
-    is needed.
-    """
+    """Merge CLI flag overrides into cfg via sub-model copy."""
     updates: dict[str, Any] = {}
-    if text_mode is not None:
-        updates["text_rendering"] = cfg.text_rendering.model_copy(update={"mode": text_mode})
-    if image_model is not None:
-        updates["ai"] = cfg.ai.model_copy(update={"image_model": image_model})
+    if text_model is not None or image_model is not None:
+        ai_updates: dict[str, Any] = {}
+        if text_model is not None:
+            ai_updates["text_model"] = text_model
+        if image_model is not None:
+            ai_updates["image_model"] = image_model
+        updates["ai"] = cfg.ai.model_copy(update=ai_updates)
     return cfg.model_copy(update=updates) if updates else cfg
 
 
 def _save_image(output: Path, image_bytes: bytes, mime_type: str) -> Path:
     """Save image bytes, fixing the extension to match the actual MIME type.
 
-    Why: Gemini API does not honor ``output_mime_type`` and may return JPEG
-    when callers asked for ``.png`` — aligning extension with content avoids
-    downstream tools (Slack, browsers) misreading the file.
+    Why: image APIs do not always honor a requested output format and may
+    return JPEG when callers asked for ``.png`` — aligning extension with
+    content avoids downstream tools (Slack, browsers) misreading the file.
     """
     actual_ext = mimetypes.guess_extension(mime_type) or ".bin"
     if output.suffix.lower() != actual_ext.lower():
@@ -130,8 +148,8 @@ def _save_image(output: Path, image_bytes: bytes, mime_type: str) -> Path:
 def _generate_test_image(output_path: Path) -> None:
     """Render a small 4-panel-style PNG used to verify Slack delivery.
 
-    Why default font: avoids dependence on Noto Sans JP being downloaded —
-    the test only needs to prove the publisher pipeline works end-to-end.
+    Why default font: avoids dependence on a downloaded font asset — the
+    test only needs to prove the publisher pipeline works end-to-end.
     """
     width, height = 600, 800
     panel_height = height // 4
@@ -159,28 +177,50 @@ def _generate_test_image(output_path: Path) -> None:
     image.save(output_path, format="PNG")
 
 
-def _run_gemini(
+def _build_openai_client(cfg: Config) -> OpenAIClient:
+    api_key = _require_env(cfg.ai.openai_api_key_env)
+    return OpenAIClient(
+        api_key=api_key,
+        text_model=cfg.ai.text_model,
+        image_model=cfg.ai.image_model,
+    )
+
+
+def _run_openai_image(
     cfg: Config,
+    openai: OpenAIClient,
     *,
     prompt: str,
     refs: list[Path],
-    action: str = "generation failed",
-) -> GeminiImageResult:
-    """Call Gemini using config-driven defaults, with a uniform error frame."""
-    api_key = _require_env(cfg.ai.image_api_key_env)
-    client = GeminiImageClient(model=cfg.ai.image_model, api_key=api_key)
+    action: str = "image generation failed",
+) -> ImageResult:
+    """Call OpenAI image generation using config-driven defaults."""
     console.print(
-        f"calling [cyan]{cfg.ai.image_model}[/cyan] "
-        f"(aspect={cfg.ai.aspect_ratio}, size={cfg.ai.image_size})…"
+        f"calling [cyan]{cfg.ai.image_model}[/cyan] (size={cfg.ai.image_size})…"
     )
     with _fail_on(action):
-        return client.generate_image(
+        return openai.generate_image(
             prompt=prompt,
             reference_images=refs or None,
-            aspect_ratio=cfg.ai.aspect_ratio,
-            image_size=cfg.ai.image_size,
+            size=cfg.ai.image_size,
             max_attempts=cfg.ai.max_image_retries,
         )
+
+
+def _merge_refs(pack: ContentPack, cli_refs: list[Path]) -> list[Path]:
+    """Concatenate auto-collected pack images with CLI ``--refs``.
+
+    Why auto then CLI: image models attend to later items in the input
+    contents list more strongly, so CLI-supplied "today only" refs land
+    closer to the prompt and influence the result more than the persistent
+    pack images.
+    """
+    auto = list(pack.images)
+    merged = auto + list(cli_refs)
+    console.print(
+        f"reference images: auto {len(auto)} + CLI {len(cli_refs)} = {len(merged)} total"
+    )
+    return merged
 
 
 @test_app.command("slack")
@@ -233,8 +273,8 @@ def test_slack(
         console.print(f"  file_id:   {result.artifact_id}")
 
 
-@test_app.command("gemini")
-def test_gemini(
+@test_app.command("image")
+def test_image(
     prompt: str = typer.Option(
         ...,
         "--prompt",
@@ -245,19 +285,21 @@ def test_gemini(
         [],
         "--refs",
         "-r",
-        help="Optional reference images (PNG/JPEG). Can be repeated.",
+        help="Optional reference images (PNG/JPEG/WebP). Can be repeated.",
     ),
     output: Path = typer.Option(
-        Path("output/test-gemini.png"),
+        Path("output/test-image.png"),
         "--output",
         "-o",
-        help="Where to save the generated image (extension auto-corrected to actual MIME).",
+        help="Where to save the generated image.",
     ),
     config_path: Path = typer.Option(Path("config.yaml"), "--config"),
+    image_model: ImageModelOption = None,
 ) -> None:
-    """Generate one image with Gemini and save it locally."""
-    cfg = load_config(config_path)
-    result = _run_gemini(cfg, prompt=prompt, refs=refs)
+    """Generate one image with OpenAI and save it locally."""
+    cfg = _apply_cli_overrides(load_config(config_path), image_model=image_model)
+    openai = _build_openai_client(cfg)
+    result = _run_openai_image(cfg, openai, prompt=prompt, refs=refs)
     saved = _save_image(output, result.image_bytes, result.mime_type)
     console.print(
         f"[green]✓ saved[/green] {saved} ({len(result.image_bytes)} bytes, {result.mime_type})"
@@ -290,21 +332,21 @@ def test_news(
 @test_app.command("panel")
 def test_panel(
     scenario_path: Path = typer.Option(
-        Path("examples/minimal/sample-scenario.json"),
+        Path("examples/minimal/sample-scenario.yaml"),
         "--scenario",
         "-s",
-        help="Path to a scenario JSON file (single episode).",
+        help="Path to a scenario YAML file (single episode).",
     ),
     content_dir: Path = typer.Option(
         Path("examples/minimal"),
         "--content",
-        help="Directory holding characters/, world/, samples/, themes/.",
+        help="Directory holding prompt.md + images/.",
     ),
     refs: list[Path] = typer.Option(
         [],
         "--refs",
         "-r",
-        help="Optional character / style reference images.",
+        help="Extra reference images merged with auto-collected images/.",
     ),
     output: Path = typer.Option(
         Path("output/test-panel.png"),
@@ -313,64 +355,67 @@ def test_panel(
         help="Where to save the generated 4-panel image.",
     ),
     config_path: Path = typer.Option(Path("config.yaml"), "--config"),
-    text_mode: TextModeOption = None,
+    text_model: TextModelOption = None,
     image_model: ImageModelOption = None,
-    save_prompt: bool = typer.Option(
+    save_rendered: bool = typer.Option(
         True,
-        "--save-prompt/--no-save-prompt",
-        help="Also write the Claude-generated prompt next to the image.",
+        "--save-rendered/--no-save-rendered",
+        help="Also write the rendered system+user prompts next to the image.",
     ),
 ) -> None:
-    """Run the full image pipeline once: scenario → prompt (Claude) → image (Gemini) → compose.
+    """Run the full image pipeline once: scenario → prompt (text LLM) → image."""
+    cfg = _apply_cli_overrides(
+        load_config(config_path), text_model=text_model, image_model=image_model
+    )
 
-    Stage 3 (compose) runs as well so the saved image reflects the final
-    output as it would be published — when ``mode=pil_overlay`` Japanese
-    bubbles are overlaid; when ``mode=model_render`` Gemini's output is
-    passed through unchanged.
-    """
-    cfg = _apply_cli_overrides(load_config(config_path), text_mode=text_mode, image_model=image_model)
-
-    episode = ScenarioEpisode.model_validate_json(scenario_path.read_text(encoding="utf-8"))
+    episode = _load_yaml_model(scenario_path, ScenarioEpisode)
     console.print(f"loaded scenario: [cyan]{episode.title}[/cyan] ({len(episode.panels)} panels)")
 
     pack = ContentPack.from_dir(content_dir, content_cfg=cfg.content)
     console.print(f"loaded content pack from [cyan]{content_dir}[/cyan]")
 
-    claude_key = _require_env(cfg.ai.scenario_api_key_env)
-    claude = ClaudeClient(model=cfg.ai.scenario_model, api_key=claude_key)
-    console.print(
-        f"asking [cyan]{cfg.ai.scenario_model}[/cyan] for image prompt "
-        f"(text mode: [cyan]{cfg.text_rendering.mode}[/cyan])…"
+    openai = _build_openai_client(cfg)
+    panel_template = resolve_template_path(
+        template_filename=_PANEL_TEMPLATE_FILENAME,
+        content_dir=content_dir,
+        builtin_dir=_builtin_templates_dir(),
     )
+    console.print(f"using panel template: [dim]{panel_template}[/dim]")
+
+    console.print(f"asking [cyan]{cfg.ai.text_model}[/cyan] for image prompt…")
     with _fail_on("prompt generation failed"):
-        image_prompt = build_image_prompt(
+        image_prompt, rendered = build_image_prompt(
             episode=episode,
             pack=pack,
-            claude=claude,
-            mode=cfg.text_rendering.mode,
+            openai=openai,
+            template_path=panel_template,
         )
 
-    if save_prompt:
-        prompt_path = output.with_suffix(".prompt.txt")
-        prompt_path.parent.mkdir(parents=True, exist_ok=True)
-        prompt_path.write_text(image_prompt, encoding="utf-8")
-        console.print(f"  wrote prompt: [dim]{prompt_path}[/dim]")
+    if save_rendered:
+        _write_rendered_prompts(output, panel_rendered=rendered, image_prompt=image_prompt)
 
-    result = _run_gemini(cfg, prompt=image_prompt, refs=refs)
-
-    with _fail_on("compose"):
-        final_bytes = compose(
-            image_bytes=result.image_bytes,
-            episode=episode,
-            mode=cfg.text_rendering.mode,
-            font_path=cfg.text_rendering.font_path,
-            bubble_style=cfg.text_rendering.bubble_style,
-        )
-
-    saved = _save_image(output, final_bytes, result.mime_type)
+    merged_refs = _merge_refs(pack, refs)
+    result = _run_openai_image(cfg, openai, prompt=image_prompt, refs=merged_refs)
+    saved = _save_image(output, result.image_bytes, result.mime_type)
     console.print(
-        f"[green]✓ saved[/green] {saved} ({len(final_bytes)} bytes, {result.mime_type})"
+        f"[green]✓ saved[/green] {saved} ({len(result.image_bytes)} bytes, {result.mime_type})"
     )
+
+
+def _write_rendered_prompts(
+    output: Path,
+    *,
+    panel_rendered: RenderedPrompt,
+    image_prompt: str,
+) -> None:
+    """Drop the rendered panel prompt + the resulting image prompt next to the output PNG."""
+    panel_path = output.with_suffix(".panel-prompt.txt")
+    image_path = output.with_suffix(".image-prompt.txt")
+    panel_path.parent.mkdir(parents=True, exist_ok=True)
+    panel_path.write_text(panel_rendered.as_combined_text(), encoding="utf-8")
+    image_path.write_text(image_prompt, encoding="utf-8")
+    console.print(f"  wrote panel prompt: [dim]{panel_path}[/dim]")
+    console.print(f"  wrote image prompt: [dim]{image_path}[/dim]")
 
 
 def _today_in_configured_tz(cfg: Config) -> str:
@@ -385,25 +430,8 @@ def _current_iso_week(cfg: Config) -> str:
     return _iso_week_of(_today_in_configured_tz(cfg))
 
 
-def _resolve_theme_filename(cfg: Config, content_dir: Path) -> str:
-    """Pick the monthly theme file (YYYY-MM.md) when present, otherwise default.md.
-
-    Why: SPEC.md prescribes ``themes/{YYYY-MM}.md`` for monthly mood, but the
-    bare template only ships ``default.md``. Falling back keeps fresh checkouts
-    runnable while honoring the monthly file the moment a user adds one.
-    """
-    month = datetime.now(ZoneInfo(cfg.schedule.timezone)).strftime("%Y-%m")
-    monthly = cfg.content.themes_path(content_dir) / f"{month}.md"
-    return f"{month}.md" if monthly.exists() else "default.md"
-
-
 def _notify_failure(cfg: Config, message: str) -> None:
-    """Post a non-blocking failure alert via Slack if it is enabled and configured.
-
-    Why isolated from _build_publishers: notification must not require any
-    other publisher to be set up, and a missing Slack token should silently
-    degrade to stderr rather than break the cron's error handling itself.
-    """
+    """Post a non-blocking failure alert via Slack if it is enabled and configured."""
     if not cfg.publishers.slack.enabled:
         return
     token = os.environ.get(cfg.publishers.slack.token_env)
@@ -489,36 +517,32 @@ def _write_archive(
     image_bytes: bytes,
     mime_type: str,
     episode: ScenarioEpisode,
-    prompt: str,
+    rendered_panel: RenderedPrompt,
+    rendered_image_prompt: str,
     cfg: Config,
-    validation: ValidationResult,
 ) -> tuple[Path, Path]:
     archive_dir.mkdir(parents=True, exist_ok=True)
     image_path = _save_image(archive_dir / f"{date}.png", image_bytes, mime_type)
-    meta_path = archive_dir / f"{date}.json"
+    meta_path = archive_dir / f"{date}.yaml"
     meta = {
         "date": date,
         "episode_number": episode.episode_number,
         "week": episode.week,
         "title": episode.title,
         "summary_no_spoiler": episode.summary_no_spoiler,
-        "image_prompt": prompt,
         "ai": {
-            "scenario_model": cfg.ai.scenario_model,
+            "text_model": cfg.ai.text_model,
             "image_model": cfg.ai.image_model,
             "image_size": cfg.ai.image_size,
             "aspect_ratio": cfg.ai.aspect_ratio,
         },
+        "rendered_panel_prompt": rendered_panel.as_combined_text(),
+        "rendered_image_prompt": rendered_image_prompt,
         "image": {"mime_type": mime_type, "size_bytes": len(image_bytes)},
-        "text_rendering_mode": cfg.text_rendering.mode,
-        "validation": {
-            "ok": validation.ok,
-            "score": validation.score,
-            "reason": validation.reason,
-        },
     }
     meta_path.write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        yaml.safe_dump(meta, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
     )
     return image_path, meta_path
 
@@ -529,7 +553,7 @@ def publish(
         ...,
         "--scenario-file",
         "-s",
-        help="Path to a scenario JSON file (single ScenarioEpisode).",
+        help="Path to a scenario YAML file (single ScenarioEpisode).",
     ),
     date_str: str | None = typer.Option(
         None,
@@ -539,26 +563,26 @@ def publish(
     content_dir: Path = typer.Option(
         Path("examples/minimal"),
         "--content",
-        help="Directory holding characters/, world/, samples/, themes/.",
+        help="Directory holding prompt.md + images/.",
     ),
     refs: list[Path] = typer.Option(
         [],
         "--refs",
         "-r",
-        help="Optional character / style reference images.",
+        help="Extra reference images merged with auto-collected images/.",
     ),
     config_path: Path = typer.Option(Path("config.yaml"), "--config"),
     state_path: Path = typer.Option(
-        Path("state/state.json"),
+        Path("state/state.yaml"),
         "--state",
-        help="Path to state.json. Updated on success unless --dry-run.",
+        help="Path to state.yaml. Updated on success unless --dry-run.",
     ),
     archive_dir: Path = typer.Option(
         Path("output/archive"),
         "--archive-dir",
-        help="Where {date}.png and {date}.json are written for reproducibility.",
+        help="Where {date}.png and {date}.yaml are written for reproducibility.",
     ),
-    text_mode: TextModeOption = None,
+    text_model: TextModelOption = None,
     image_model: ImageModelOption = None,
     dry_run: bool = typer.Option(
         False,
@@ -567,12 +591,12 @@ def publish(
     ),
 ) -> None:
     """Run the full pipeline: scenario → image → multi-publish + archive."""
-    cfg = _apply_cli_overrides(load_config(config_path), text_mode=text_mode, image_model=image_model)
+    cfg = _apply_cli_overrides(
+        load_config(config_path), text_model=text_model, image_model=image_model
+    )
 
     with _fail_on("load scenario"):
-        episode_data = ScenarioEpisode.model_validate_json(
-            scenario_file.read_text(encoding="utf-8")
-        )
+        episode_data = _load_yaml_model(scenario_file, ScenarioEpisode)
 
     pub_date = date_str or _today_in_configured_tz(cfg)
     _publish_episode_pipeline(
@@ -606,42 +630,34 @@ def _publish_episode_pipeline(
     with _fail_on("load content pack"):
         pack = ContentPack.from_dir(content_dir, content_cfg=cfg.content)
 
-    claude_key = _require_env(cfg.ai.scenario_api_key_env)
-    claude = ClaudeClient(model=cfg.ai.scenario_model, api_key=claude_key)
-    console.print(f"asking [cyan]{cfg.ai.scenario_model}[/cyan] for image prompt…")
+    openai = _build_openai_client(cfg)
+    panel_template = resolve_template_path(
+        template_filename=_PANEL_TEMPLATE_FILENAME,
+        content_dir=content_dir,
+        builtin_dir=_builtin_templates_dir(),
+    )
+
+    console.print(f"asking [cyan]{cfg.ai.text_model}[/cyan] for image prompt…")
     with _fail_on("prompt generation failed"):
-        image_prompt = build_image_prompt(
+        image_prompt, panel_rendered = build_image_prompt(
             episode=episode_data,
             pack=pack,
-            claude=claude,
-            mode=cfg.text_rendering.mode,
+            openai=openai,
+            template_path=panel_template,
         )
 
-    gemini_result = _run_gemini(cfg, prompt=image_prompt, refs=refs)
-
-    with _fail_on("compose"):
-        final_bytes = compose(
-            image_bytes=gemini_result.image_bytes,
-            episode=episode_data,
-            mode=cfg.text_rendering.mode,
-            font_path=cfg.text_rendering.font_path,
-            bubble_style=cfg.text_rendering.bubble_style,
-        )
-
-    validation = validate(image_bytes=final_bytes, episode=episode_data)
-    if not validation.ok:
-        err_console.print(f"[red]✗ validation failed:[/red] {validation.reason}")
-        raise typer.Exit(code=1)
+    merged_refs = _merge_refs(pack, refs)
+    image_result = _run_openai_image(cfg, openai, prompt=image_prompt, refs=merged_refs)
 
     archive_image, archive_meta = _write_archive(
         archive_dir=archive_dir,
         date=pub_date,
-        image_bytes=final_bytes,
-        mime_type=gemini_result.mime_type,
+        image_bytes=image_result.image_bytes,
+        mime_type=image_result.mime_type,
         episode=episode_data,
-        prompt=image_prompt,
+        rendered_panel=panel_rendered,
+        rendered_image_prompt=image_prompt,
         cfg=cfg,
-        validation=validation,
     )
     console.print(f"  archive image: [dim]{archive_image}[/dim]")
     console.print(f"  archive meta:  [dim]{archive_meta}[/dim]")
@@ -657,8 +673,12 @@ def _publish_episode_pipeline(
     publishers = _build_publishers(cfg)
     if not publishers:
         err_console.print(
-            "[yellow]warning:[/yellow] no publishers are enabled in config.yaml"
+            "[yellow]warning:[/yellow] no publishers are enabled in config.yaml; "
+            "state not updated."
         )
+        if dry_run:
+            console.print("[green]✓ dry-run complete (nothing to do)[/green]")
+        return
 
     if dry_run:
         for pub in publishers:
@@ -668,12 +688,6 @@ def _publish_episode_pipeline(
 
     results = _run_publishers(publishers, episode_obj, archive_image)
     _print_publish_results(results)
-
-    if not publishers:
-        err_console.print(
-            "[yellow]no publishers were configured; state not updated.[/yellow]"
-        )
-        return
 
     # Why all-failure short-circuits state: leaving state untouched lets
     # CI retry tomorrow without burning the episode_number, and signals
@@ -706,31 +720,33 @@ def publish_today(
     content_dir: Path = typer.Option(
         Path("examples/minimal"),
         "--content",
-        help="Directory holding characters/, world/, samples/, themes/.",
+        help="Directory holding prompt.md + images/.",
     ),
     refs: list[Path] = typer.Option(
         [],
         "--refs",
         "-r",
-        help="Optional character / style reference images.",
+        help="Extra reference images merged with auto-collected images/.",
     ),
     config_path: Path = typer.Option(Path("config.yaml"), "--config"),
-    state_path: Path = typer.Option(Path("state/state.json"), "--state"),
+    state_path: Path = typer.Option(Path("state/state.yaml"), "--state"),
     scenarios_dir: Path = typer.Option(
         Path("scenarios"),
         "--scenarios-dir",
-        help="Directory containing {YYYY-Www}.json scenario files.",
+        help="Directory containing {YYYY-Www}.yaml scenario files.",
     ),
     archive_dir: Path = typer.Option(Path("output/archive"), "--archive-dir"),
-    text_mode: TextModeOption = None,
+    text_model: TextModelOption = None,
     image_model: ImageModelOption = None,
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     """Pick the next episode for today's ISO week from scenarios/, then publish."""
-    cfg = _apply_cli_overrides(load_config(config_path), text_mode=text_mode, image_model=image_model)
+    cfg = _apply_cli_overrides(
+        load_config(config_path), text_model=text_model, image_model=image_model
+    )
     pub_date = date_str or _today_in_configured_tz(cfg)
     target_week = _iso_week_of(pub_date)
-    week_path = scenarios_dir / f"{target_week}.json"
+    week_path = scenarios_dir / f"{target_week}.yaml"
 
     if not week_path.exists():
         msg = (
@@ -742,9 +758,8 @@ def publish_today(
         raise typer.Exit(code=1)
 
     with _fail_on("load week scenarios"):
-        week_data = ScenarioWeek.model_validate_json(
-            week_path.read_text(encoding="utf-8")
-        )
+        raw = yaml.safe_load(week_path.read_text(encoding="utf-8"))
+        week_data = ScenarioWeek.model_validate(raw)
 
     state = StateStore(state_path).load()
     if (
@@ -801,12 +816,12 @@ def generate_scenarios(
     out: Path | None = typer.Option(
         None,
         "--out",
-        help="Output JSON path. Defaults to scenarios/{week}.json.",
+        help="Output YAML path. Defaults to scenarios/{week}.yaml.",
     ),
     content_dir: Path = typer.Option(
         Path("examples/minimal"),
         "--content",
-        help="Directory holding characters/, world/, samples/, themes/.",
+        help="Directory holding prompt.md + images/.",
     ),
     no_news: bool = typer.Option(
         False,
@@ -816,14 +831,15 @@ def generate_scenarios(
     force: bool = typer.Option(
         False,
         "--force",
-        help="Overwrite an existing scenarios/{week}.json.",
+        help="Overwrite an existing scenarios/{week}.yaml.",
     ),
     config_path: Path = typer.Option(Path("config.yaml"), "--config"),
 ) -> None:
-    """Ask Claude for 7 episodes for the given ISO week."""
+    """Ask the text LLM for 7 episodes for the given ISO week."""
     cfg = load_config(config_path)
     target_week = week or _current_iso_week(cfg)
-    output_path = out or Path("scenarios") / f"{target_week}.json"
+    output_path = out or Path("scenarios") / f"{target_week}.yaml"
+    rendered_path = output_path.with_suffix(".rendered.txt")
 
     if output_path.exists() and not force:
         err_console.print(
@@ -832,14 +848,15 @@ def generate_scenarios(
         raise typer.Exit(code=1)
 
     with _fail_on("load content pack"):
-        pack = ContentPack.from_dir(
-            content_dir,
-            content_cfg=cfg.content,
-            theme_filename=_resolve_theme_filename(cfg, content_dir),
-        )
+        pack = ContentPack.from_dir(content_dir, content_cfg=cfg.content)
 
-    api_key = _require_env(cfg.ai.scenario_api_key_env)
-    claude = ClaudeClient(model=cfg.ai.scenario_model, api_key=api_key)
+    openai = _build_openai_client(cfg)
+    scenario_template = resolve_template_path(
+        template_filename=_SCENARIO_TEMPLATE_FILENAME,
+        content_dir=content_dir,
+        builtin_dir=_builtin_templates_dir(),
+    )
+    console.print(f"using scenario template: [dim]{scenario_template}[/dim]")
 
     headlines: list[str] = []
     if no_news or not cfg.news.enabled:
@@ -852,25 +869,32 @@ def generate_scenarios(
         )
 
     console.print(
-        f"asking [cyan]{cfg.ai.scenario_model}[/cyan] for 7 episodes "
+        f"asking [cyan]{cfg.ai.text_model}[/cyan] for 7 episodes "
         f"for week [cyan]{target_week}[/cyan]…"
     )
     with _fail_on("scenario generation failed"):
-        scenarios = generate_week(
-            claude=claude,
+        scenarios, rendered = generate_week(
+            openai=openai,
             pack=pack,
             week=target_week,
+            template_path=scenario_template,
             news_headlines=headlines or None,
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
-        scenarios.model_dump_json(indent=2) + "\n",
+        yaml.safe_dump(
+            scenarios.model_dump(mode="json"),
+            allow_unicode=True,
+            sort_keys=False,
+        ),
         encoding="utf-8",
     )
+    rendered_path.write_text(rendered.as_combined_text(), encoding="utf-8")
     console.print(
         f"[green]✓ saved[/green] {output_path} ({len(scenarios.episodes)} episodes)"
     )
+    console.print(f"  rendered prompt: [dim]{rendered_path}[/dim]")
 
 
 if __name__ == "__main__":  # pragma: no cover

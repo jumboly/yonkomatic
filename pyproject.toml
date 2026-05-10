@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "yonkomatic contributors" }]
-keywords = ["manga", "ai", "slack", "discord", "automation", "claude", "gemini"]
+keywords = ["manga", "ai", "slack", "discord", "automation", "openai"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "License :: OSI Approved :: MIT License",
@@ -23,8 +23,7 @@ dependencies = [
     "slack-sdk>=3.27",
     "pillow>=10.3",
     "python-dotenv>=1.0",
-    "google-genai>=2.0.0",
-    "anthropic>=0.100.0",
+    "openai>=1.50.0",
     "jinja2>=3.1",
     "feedparser>=6.0",
 ]

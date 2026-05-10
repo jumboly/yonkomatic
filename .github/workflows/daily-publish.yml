@@ -25,24 +25,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      # Why static cache key: scripts/install_fonts.py downloads from a
-      # fixed URL (Noto Sans JP CJK regular OTF). Bump v1 -> v2 only when
-      # the script's URL changes.
-      - name: Cache Noto Sans JP
-        id: cache-fonts
-        uses: actions/cache@v4
-        with:
-          path: assets/fonts/NotoSansJP-Regular.otf
-          key: noto-sans-jp-otf-v1
-
-      - name: Install fonts
-        if: steps.cache-fonts.outputs.cache-hit != 'true'
-        run: uv run python scripts/install_fonts.py
-
       - name: Publish today's episode
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GOOGLE_AI_STUDIO_API_KEY: ${{ secrets.GOOGLE_AI_STUDIO_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
         run: uv run yonkomatic publish-today

@@ -9,46 +9,35 @@ configuration objects stay free of secrets.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-ImageSize = Literal["512", "1K", "2K", "4K"]
-AspectRatio = Literal["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9"]
-TextRenderMode = Literal["pil_overlay", "model_render"]
-BubbleStyle = Literal["round", "rectangle", "cloud"]
-
 
 class ContentConfig(BaseModel):
     base_dir: Path = Path("./content")
-    characters_dir: str = "characters"
-    world_dir: str = "world"
-    samples_dir: str = "samples"
-    themes_dir: str = "themes"
+    prompt_filename: str = "prompt.md"
+    images_dir: str = "images"
+    max_images: int = 10
 
-    def characters_path(self, base: Path | None = None) -> Path:
-        return (base or self.base_dir) / self.characters_dir
+    def prompt_path(self, base: Path | None = None) -> Path:
+        return (base or self.base_dir) / self.prompt_filename
 
-    def world_path(self, base: Path | None = None) -> Path:
-        return (base or self.base_dir) / self.world_dir
-
-    def samples_path(self, base: Path | None = None) -> Path:
-        return (base or self.base_dir) / self.samples_dir
-
-    def themes_path(self, base: Path | None = None) -> Path:
-        return (base or self.base_dir) / self.themes_dir
+    def images_path(self, base: Path | None = None) -> Path:
+        return (base or self.base_dir) / self.images_dir
 
 
 class AIConfig(BaseModel):
-    scenario_model: str = "claude-sonnet-4-6"
-    image_model: str = "gemini-3.1-flash-image-preview"
-    image_size: ImageSize = "1K"
-    aspect_ratio: AspectRatio = "3:4"
+    text_model: str = "gpt-5.4"
+    image_model: str = "gpt-image-1"
+    # OpenAI image API expects pixel sizes (e.g. "1024x1536") rather than
+    # Gemini's "1K"/"2K" tiers. 1024x1536 is the native 3:4 portrait option.
+    image_size: str = "1024x1536"
+    aspect_ratio: str = "3:4"
     max_image_retries: int = 3
-    scenario_api_key_env: str = "ANTHROPIC_API_KEY"
-    image_api_key_env: str = "GOOGLE_AI_STUDIO_API_KEY"
+    openai_api_key_env: str = "OPENAI_API_KEY"
 
 
 class SlackPublisherConfig(BaseModel):
@@ -89,25 +78,12 @@ class NewsConfig(BaseModel):
     language: str = "ja"
 
 
-class TextRenderingConfig(BaseModel):
-    # Why "pil_overlay" default: lower-tier Gemini image models hallucinate
-    # Japanese characters when asked to render multiple bubbles, so we
-    # instruct Gemini to skip text and composite Japanese with PIL afterwards.
-    # "model_render" lets the image model draw bubbles + text directly
-    # (skips PIL); only viable on higher-tier models that can render
-    # legible Japanese reliably (e.g. gemini-3-pro-image-preview).
-    mode: TextRenderMode = "pil_overlay"
-    font_path: Path = Path("./assets/fonts/NotoSansJP-Regular.otf")
-    bubble_style: BubbleStyle = "round"
-
-
 class Config(BaseModel):
     content: ContentConfig = Field(default_factory=ContentConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
     publishers: PublishersConfig = Field(default_factory=PublishersConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     news: NewsConfig = Field(default_factory=NewsConfig)
-    text_rendering: TextRenderingConfig = Field(default_factory=TextRenderingConfig)
 
 
 DEFAULT_CONFIG_PATH = Path("config.yaml")

@@ -3,7 +3,7 @@
 A scenario is the structured plot of one yonkoma episode: title, summary,
 and four panels — each with a description, the characters present, and
 zero or more dialogue lines. The week-level container holds seven episodes
-plus the ISO week identifier, so a single JSON file represents one week
+plus the ISO week identifier, so a single YAML file represents one week
 of content.
 
 These models are the contract between scenario generation (Step 4) and
@@ -13,23 +13,19 @@ in ``examples/minimal/`` must validate against this schema.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-DialogueKind = Literal["speech", "thought", "shout"]
-
 
 class Dialogue(BaseModel):
-    speaker: str  # character key matching content/characters/settings.md (e.g. "yonko")
+    speaker: str  # character key matching content/prompt.md (e.g. "yonko")
     text: str
-    # Default "speech" keeps pre-Step-5 scenario JSON files (no `kind` field) loadable.
-    kind: DialogueKind = "speech"
 
 
 class Panel(BaseModel):
     index: Annotated[int, Field(ge=1, le=4)]
-    description: str  # what is happening in the panel — passed to Claude / Gemini
+    description: str  # what is happening in the panel — passed to the LLM
     characters: list[str] = Field(default_factory=list)
     dialogue: list[Dialogue] = Field(default_factory=list)
 

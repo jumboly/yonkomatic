@@ -62,7 +62,6 @@ uv run yonkomatic test slack
 
 ## 次のステップ
 
-Step 2 (画像生成コア) に進む際に、以下のキーが必要になります:
+シナリオ生成 + 画像生成を動かすには以下のキーが必要になります:
 
-- `ANTHROPIC_API_KEY` (<https://console.anthropic.com/>)
-- `GOOGLE_AI_STUDIO_API_KEY` (<https://aistudio.google.com/>)
+- `OPENAI_API_KEY` (<https://platform.openai.com/api-keys>) — テキスト (gpt-5.4) と画像 (gpt-image-1) の両方で使用

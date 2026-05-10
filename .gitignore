@@ -47,6 +47,3 @@ Thumbs.db
 /docs/css/
 /docs/.posts-index.json
 
-# Downloaded fonts (OFL-1.1) — fetched by scripts/install_fonts.py
-assets/fonts/*.otf
-assets/fonts/*.ttf
