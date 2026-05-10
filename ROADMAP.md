@@ -8,11 +8,11 @@
 
 ## 現在地
 
-- **完了**: Step 1〜4, **Step 5 全部** (5a/5b/5c/5d + simplify), **Step 5e** (実装 + A/B 検証、本番採用見送り), **Step 6** (テンプレ化 + OpenAI 切替 + 構造刷新), **Step 6.5** (gpt-image-2 → 960x1280 本番採用、**W21 全 7 話で 7/7 完全一致を確証**), **Step 6.6** (Actions の batch 化 — 実装は Step 6.5 と一体で完了済み), **Step 7a** (生成物の gh-pages 分離 — workflow を gh-pages worktree + symlink 経由に切替、main からランタイムを完全分離), **Step 7b** (`batch-resubmit-missing` CLI + manifest `retries[]` + daily-publish への best-effort step 配線、上限 2 回・prompt reuse、ローカル 5 ケース目視 OK), **Step 7c** (CONTRIBUTING.md 新規作成 — fork 運用前提 + 開発ルール明文化、README から「貢献」節経由でリンク), **Step 7d** (pytest 6 ファイル / 44 ケース新設 — schema / state / panel / news / static_site / batch manifest をオフラインモック化、`.github/workflows/ci.yml` で PR + main push に lint+test、`[dependency-groups].dev` に統一), **Step 7e** (README 全面リライト — 6 節構成 = Status/Demo/Quick Start/How it works/位置付け/リンク集、W21 ep4+ep5 を `assets/demo/` に並べて本番品質サンプル提示、章立て表で gpt-5.4 / gpt-image-2 / Publisher Protocol を要約)、batch CLI、モデル別ガイダンス機構 (scenario / panel-prompt 両 LLM)、参考画像 LLM 告知配線
-- **次**: **Step 7f** (SETUP.md 全面改訂 — `.gitignore` 緩和削除 + gh-pages deploy 設定 + batch リトライ運用) に着手 — Step 7 全体は 7a〜7h に分割済み (下記セクション参照)
+- **完了**: Step 1〜4, **Step 5 全部** (5a/5b/5c/5d + simplify), **Step 5e** (実装 + A/B 検証、本番採用見送り), **Step 6** (テンプレ化 + OpenAI 切替 + 構造刷新), **Step 6.5** (gpt-image-2 → 960x1280 本番採用、**W21 全 7 話で 7/7 完全一致を確証**), **Step 6.6** (Actions の batch 化 — 実装は Step 6.5 と一体で完了済み), **Step 7a** (生成物の gh-pages 分離 — workflow を gh-pages worktree + symlink 経由に切替、main からランタイムを完全分離), **Step 7b** (`batch-resubmit-missing` CLI + manifest `retries[]` + daily-publish への best-effort step 配線、上限 2 回・prompt reuse、ローカル 5 ケース目視 OK), **Step 7c** (CONTRIBUTING.md 新規作成 — fork 運用前提 + 開発ルール明文化、README から「貢献」節経由でリンク), **Step 7d** (pytest 6 ファイル / 44 ケース新設 — schema / state / panel / news / static_site / batch manifest をオフラインモック化、`.github/workflows/ci.yml` で PR + main push に lint+test、`[dependency-groups].dev` に統一), **Step 7e** (README 全面リライト — 6 節構成 = Status/Demo/Quick Start/How it works/位置付け/リンク集、W21 ep4+ep5 を `assets/demo/` に並べて本番品質サンプル提示、章立て表で gpt-5.4 / gpt-image-2 / Publisher Protocol を要約), **Step 7f** (SETUP.md 全面改訂 — 旧 §7 「.gitignore 緩和」を削除して 12 節構成に再整理、§6 を gh-pages 体制に整合化、新 §10 GitHub Pages deploy + 新 §11 batch リトライ運用を追加、§0/§1 で private fork 推奨理由を機密性ベースに更新、§12 で `merge.ours.driver true` を「fork 後 1 度だけ」と明記)、batch CLI、モデル別ガイダンス機構 (scenario / panel-prompt 両 LLM)、参考画像 LLM 告知配線
+- **次**: **Step 7g** (private fork 実運用検証 — 1 週間 cron 観察、preflight 利用率 / batch 完走率を記録) に着手 — 7a/7b/7d/7f が乗った main を private fork に取り込み、cron を有効化して 1 週間放置
 - **ブロッカー**: Step 7a/7b の private fork 動作確認 (Step 7g 検証手順) は実環境がないと実施不可、コミット後に手動 dispatch で確認
 
-最終更新: 2026-05-10 (Step 7e 実装完了 — README を 6 節構成にリライト、`assets/demo/` に W21 ep4 「静かな通知音」+ ep5 「傘の待機列」の 2 枚を本番品質サンプルとして配置、Demo URL は fork 後 `https://<your>.github.io/yonkomatic/` 例として注記)
+最終更新: 2026-05-10 (Step 7f 実装完了 — SETUP.md を 12 節構成に改訂、旧 §7「.gitignore 緩和」を完全削除、新 §10 GitHub Pages 設定 + 新 §11 batch リトライ運用 (上限 2 回 + sync フォールバック + 観測方法) を追加、§6 を「push 先 = gh-pages branch のみ」に整合化、§12 で `merge.ours.driver true` を「fork 直後 1 度だけ」と明記)
 
 ### Step 6.5 余波の検証ログ (2026-05-10 W21 batch で 3 件すべて確証済み)
 
@@ -514,20 +514,34 @@ yonkomatic batch-fetch-images --week 2026-W21
 
 Python コード / config / workflow への変更なし、`uv run ruff check src/ tests/` 緑。
 
-#### ⏳ Step 7f — SETUP.md 全面改訂 (0.5〜1 セッション)
+#### ✅ Step 7f — SETUP.md 全面改訂 (2026-05-10)
 
-**スコープ**: 7a で `.gitignore` 緩和が不要になった反映 + 7b のリトライ運用 + GitHub Pages の deploy 設定追加 + `.gitattributes` merge driver 登録手順 (既存 §11 の補強)。
+**結果**: SETUP.md を 12 節構成に書き換え (旧 11 節 + 新 §10/§11 挿入 - 旧 §7 削除 = 12)。`.gitignore` 緩和節を完全削除し、Step 7a の gh-pages 体制と Step 7b の batch リトライを利用者向けに明文化。`uv run ruff check src/ tests/` 緑、Python コード / config / workflow への変更なし。
 
-**完了条件**:
-- 旧 §7 「.gitignore を緩和」を **削除** (7a で main に運用パターンが書かれない前提)
-- 新節「GitHub Pages の deploy source 設定」追加 (`Deploy from a branch: gh-pages /(root)`)
-- 新節「batch リトライの自動化 (Step 6.7)」追加 — failed/expired 時の挙動説明
-- §0 前提に **「fork は private 必須」** を強調
-- §11 上流取り込みに「初回 1 度だけ `git config --add merge.ours.driver true` を fork で実行」
-- §6 Workflow permissions の文言を gh-pages 体制に整合化 (push 先が gh-pages branch であることを明記)
-- 全章で「branch 戦略」記述を 1 箇所に集約
+**確定した節構成 (12 節)**:
 
-**影響ファイル**: `SETUP.md`, `CLAUDE.md` (必要なら 1〜2 行同期)
+| # | 節 | 状態 |
+|---|---|---|
+| 0 | 前提 | 修正 (private 推奨を末尾 1 行で強調) |
+| 1 | fork する | 修正 (private 推奨理由を Bot Token security + 生成物機密性に書き換え、3 bullet で根拠提示) |
+| 2-5 | ローカル / Slack Bot / .env / Secrets | 据置 |
+| 6 | Workflow permissions | 修正 (push 先 = orphan gh-pages branch only、初回 dispatch で自動初期化を明記) |
+| ~~7~~ | ~~`.gitignore` 緩和~~ | **削除 (17 行)** |
+| 7 | cron schedule 有効化 | 旧 §8 を繰り上げ |
+| 8 | キャラ素材持ち込み | 旧 §9 を繰り上げ |
+| 9 | GitHub Actions 動作確認 | 旧 §10 を繰り上げ |
+| **10** | **GitHub Pages 有効化 (任意)** | **新規** (Settings → Pages → Source = gh-pages /(root)、初回 dispatch 後にしか branch ドロップダウンに出ないことを注記、Slack のみで済ます場合は skip 可) |
+| **11** | **batch 失敗時の自動リトライ** | **新規** (3 段階リカバリ = fetch → sync フォールバック → resubmit-missing 上限 2 回、観測方法 = `state/batches/{week}.yaml` の `retries[]` + Actions ログ `resubmitting N episode(s) ...` を grep) |
+| 12 | 上流から更新を取り込む | 旧 §11 を繰り上げ + `merge.ours.driver true` を「fork 直後 1 度だけ」と明記、衝突しうる箇所のリストから `.gitignore` を削除 |
+| — | トラブルシュート | 旧「batch 失敗時のフォールバック」を削除し §11 への参照に置換、4 項目 (`not_in_channel` / `missing_scope` / `invalid_auth` / `cron が走らない`) は据置 |
+
+**確定した方針**:
+1. **GitHub Pages は独立節 §10** として詳述 (§6 と一体化しない理由: Pages の Branch ドロップダウンに `gh-pages` が出るのは初回 workflow_dispatch 後で、§9 動作確認の直後に置くと依存関係が時系列で読める)
+2. **batch リトライは §10 の直後の独立節 §11** として詳述 (§8 cron 設定や trouble shoot に分散させず、利用者が「失敗するとどうなる」を能動的に読める位置)
+3. **`.gitignore` 緩和は完全削除** (Step 7a 以降は worktree + symlink で自動分離されるため、旧手順は誤情報。§番号の繰り上げで CONTRIBUTING.md:34 が参照する `SETUP.md §4` (= `.env`) は位置不変なので影響なし)
+4. **README / CONTRIBUTING の §N 参照確認**: README の SETUP 参照は §番号を含まず (`SETUP.md` への一般的なリンクのみ)、CONTRIBUTING.md:34 のみ §4 を参照するが §4 は不変
+
+**影響ファイル**: `SETUP.md` (234 → 不変近く、差分: -17 行 / +29 行 / 修正 ~30 行)。`CLAUDE.md` への同期は不要 (CLAUDE は開発者向け、SETUP は利用者向けで責務分離が成立している)。
 
 #### ⏳ Step 7g — private fork 実運用検証 (1 週間観察、Step 6.6 から繰越)
 
@@ -566,6 +580,7 @@ Python コード / config / workflow への変更なし、`uv run ruff check src
 
 新しい決定が出たら頭に追加。古いものは削除せず残す。
 
+- **2026-05-10 (Step 7f 実装完了)** SETUP.md を 12 節構成に全面改訂し、Step 7a (gh-pages worktree + symlink) と Step 7b (batch リトライ) の利用者向け運用ドキュメントを整備。**確定した方針**: (1) **§7「.gitignore を緩和」(L112-128, 17 行) を完全削除** — Step 7a で worktree + symlink により利用者の `.gitignore` 編集が不要になったため、旧手順は誤情報になる。後続節 (旧§8/§9/§10/§11) を 1 つずつ繰り上げ、(2) **GitHub Pages 設定は独立節 §10** として詳述 (§6 Permissions と一体化しない理由: Pages の Branch ドロップダウンに `gh-pages` が出るのは初回 workflow_dispatch 後で、§9 動作確認の直後に置くと時系列で依存関係が読める)。手順は Settings → Pages → Source = `Deploy from a branch`、Branch = `gh-pages` / `(root)`。Slack のみで済ます場合は skip 可だが gh-pages branch は CI が常に使うため削除しないことを明記、(3) **batch リトライは独立節 §11** として詳述 (§8 cron 設定や trouble shoot に分散させない)。3 段階リカバリ = `batch-fetch-images` (best-effort) → `publish-today` の sync フォールバック → `batch-resubmit-missing` (上限 2 回 / preflight 不在 + 未投稿のみ / 初回 prompt 再利用で text LLM 追加コストなし)。観測方法 = `state/batches/{week}.yaml` の `retries[]` 配列 + Actions ログで `resubmitting N episode(s) (epX, epY) as retry #M of 2` を grep、(4) **§0/§1 の private 推奨理由を更新** — 旧「Slack 投稿アーカイブを含む」→ 新「Bot Token security + 生成物の機密性 + workflow 改変による token 漏洩リスク削減」を 3 bullet で根拠提示、(5) **§6 Workflow permissions** を「push 先 = orphan `gh-pages` branch only、main は変更されない」に書き換え、初回 dispatch でのプレースホルダ自動初期化に言及、(6) **§12 上流取り込み** で `merge.ours.driver true` を「fork 直後 (clone した作業ディレクトリで) 1 度だけ」と明記、別マシンで clone し直したら再実行が必要なことを補足。衝突しうる箇所のリストから `.gitignore` を削除し `workflow の schedule:` のみに、(7) **CLAUDE.md 同期は不要** — CLAUDE は開発者向け、SETUP は利用者向けで責務分離が既に成立、(8) **CONTRIBUTING.md:34 への影響なし** — `SETUP.md §4` (= `.env`) を参照しているが、§7 削除後も §4 は位置不変。**修正**: `SETUP.md` (234 行近く維持、差分 -17 / +29 / 修正 ~30)。Python コード / config / workflow への変更なし、`uv run ruff check src/ tests/` 緑。Step 7g (private fork 実運用検証) が次。
 - **2026-05-10 (Step 7e 実装完了)** README を全面リライトし、本番品質サンプル 2 枚を `assets/demo/` に配置。**確定した方針**: (1) **章立ては 6 節構成** = Status (1 行) / Demo (画像 2 枚 + Demo URL 注記) / Quick Start (5 ステップ) / How it works (パイプライン図 + 技術スタック表 + content 構造) / このリポジトリの位置付け (upstream vs fork 図解、現行維持) / リンク集 / ライセンス。ROADMAP §7e 指示の「Quick Start / Demo / How it works / リンク集」4 節に「位置付け」節を残す形で着地、(2) **デモ画像は W21 ep4 + ep5 を 2 枚並べ** — ROADMAP 推奨の「ep4 or ep5」を両方採用 (屋内 SFX「ピッ」× 屋外オチ「ぽつ」で雰囲気差)。`output/preflight/2026-W21/` から `assets/demo/2026-w21-ep{4,5}-{quiet-notification,umbrella-queue}.png` にコピー、Markdown table 2 列で並べてキャプションは「summary_no_spoiler」原文流用、(3) **Demo URL は fork 後 URL 例で注記** — `https://<your-name>.github.io/yonkomatic/` の形で示し、上流テンプレは cron 停止のため deploy されない旨を明記。`jumboly.github.io/yonkomatic/` を直書きせず汎用例にしたのは fork 利用者が自分の URL に置き換えやすくするため、(4) **モデル名は config.yaml と整合確認** — text=`gpt-5.4` / image=`gpt-image-2`、現 config.yaml と一致を grep で確認してから記載、(5) **「content/ の構造」節は廃止** — How it works 内の小ブロック (`prompt.md` + `images/` だけ) に圧縮、詳細は SETUP.md/CLAUDE.md に委譲、(6) **Status 行は暫定表記** — 「Step 7 着手中、7a/7b/7c/7d 完了、本 README は 7e の成果物」。7g 完了後に「Step 7 完了」へ書き換える運用を §7g 完了条件に既に明記済み、(7) **How it works に技術スタック表を統合** — 旧「アーキテクチャ概要」節を廃止し、パイプライン ASCII 図の直下に表を置く形で重複を排除、`Publisher Protocol で抽象化、Discord は将来対応` も保持、(8) **Discord 将来対応の文言は維持** — Step 7 のスコープ外だが、Publisher Protocol 設計の意図を示すため残す。**新規ファイル**: `assets/demo/2026-w21-ep4-quiet-notification.png` (1.9MB) / `assets/demo/2026-w21-ep5-umbrella-queue.png` (2.0MB)。**修正**: `README.md` (77 → 102 行、6 節再構成)。`uv run ruff check src/ tests/` 緑。Python コード / config / workflow 変更なし。
 - **2026-05-10 (Step 7d 実装完了)** `tests/` をフラット構成で新設、6 ファイル 44 ケースの pytest を追加。**確定した方針**: (1) **dev deps は `[dependency-groups].dev` に統一** — `[project.optional-dependencies]` セクションを削除し pytest/pytest-mock/ruff を移動 (uv 流儀の単一ソース、PEP 735 準拠)、(2) **`tests/` フラット構成** — モジュール構造に揃えたサブディレクトリは作らず `tests/test_*.py` 直下で見通し確保、(3) **`conftest.py` 作らない** — 共通 fixture は各ファイル内のローカルヘルパで十分、結合を避ける、(4) **OpenAI mock は `MagicMock(spec=OpenAIClient)`** — `mocker.patch("...complete")` よりテスト主体が明確、spec で API ドリフト検知、(5) **feedparser patch 先は `yonkomatic.news.fetcher.feedparser.parse`** (import 元側) — ネットワーク漏れ防止のためテスト全本で統一、(6) **`_load_batch_job_meta` テストは `monkeypatch.chdir(tmp_path)` 必須** — 関数が CWD 相対 (`Path("state/batches/...")`) のためリポジトリ実 state を読む事故を回避、(7) **CI は PR + main push 両トリガー** — fork 利用者の PR でも作者の merge 後でも回る、(8) **`uv sync` は `--frozen` なし** — 本コミットで `uv.lock` も再生成、daily-publish 側の frozen 整合は次以降の責務外、(9) **`[tool.pytest.ini_options]` に `testpaths = ["tests"]` のみ** — `addopts` / `asyncio_mode` / `filterwarnings` は最小起動で。**新規ファイル**: `tests/test_scenario_schema.py` (7) / `test_state_repo.py` (7) / `test_panel_description.py` (8) / `test_news_fetcher.py` (8) / `test_publisher_static_site.py` (8) / `test_batch_manifest.py` (6) / `.github/workflows/ci.yml`。**修正**: `pyproject.toml` (groups 統一 + pytest config) / `uv.lock` (再生成) / `CONTRIBUTING.md` §3-4,7 (lint コマンド + テスト節 + PR 流儀) / `CLAUDE.md` (lint+test コマンド例)。`uv run pytest` 0.46s で 44 passed、`uv run ruff check src/ tests/` 緑。**Step 7b retries 同居テスト 1 ケース追加** — `_load_batch_job_meta` が retries[].results 配下の custom_id を誤返却しない契約を固定。
 - **2026-05-10 (Step 7c 実装完了)** `CONTRIBUTING.md` を新規作成し、上流テンプレへの貢献ガイドを明文化。**確定した方針**: (1) **9 章構成** = 位置付けと貢献の範囲 / 開発環境 (uv) / Lint (`uv run ruff check src/`) / テスト (Step 7d 完了後追記の placeholder + 既存 `test slack/panel` を手動 integration として案内) / コーディング規約 (CLAUDE.md からの噛み砕き — WHY のみコメント / Step 番号は code に書かない / `typer.Exit` / `_fail_on` / `PublishResult(ok=False)`) / コミットメッセージ規約 (Conventional Commits 風 + **Co-Authored-By 禁止** を再掲、出典 §2026-05-08) / PR 流儀 (説明テンプレ「何を / なぜ / 動作確認」、lint 緑前提、レビュアー指名不要) / Issue & Discussions (バグのみ Issue、要望・質問は Discussions) / ライセンスと行動規範 (MIT + Contributor Covenant 相当を inline)、(2) **Issue / PR テンプレートは置かない** (テンプレ専用リポゆえ流入を絞る)、(3) **Code of Conduct は inline** (別ファイル化しない)、(4) **PR 流儀は contributor 向け基本ルールのみ** (ROADMAP/SPEC 更新義務は課さない、メンテナ向け規約は CLAUDE.md 既載)、(5) **Issue は再現性あるバグのみ受付**。`README.md` の「ライセンス」直前に「貢献」節 (CONTRIBUTING へのリンク 1 段落) を追加。新規 / 改修ファイルは `CONTRIBUTING.md` (新規) と `README.md` のみ、Python コード変更なし、`uv run ruff check src/` 緑。
