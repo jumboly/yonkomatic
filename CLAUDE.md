@@ -71,7 +71,20 @@ API キーやチャンネル ID 等の機密値は **設定オブジェクトに
 - ❌ 利用者個別のキャラ素材、API キー、`scenarios/` `output/` `state/` の実データ
 - `examples/minimal/images/` の画像はプロジェクトが OSS ライセンス下で配布する用に保有するものに限定する。利用者は自前の画像に差し替えて運用する想定 (利用者ブランチ側で `images/` を上書き)
 
-`.gitignore` の `/scenarios/`, `/output/`, `/state/` は **先頭 `/` 必須**。`state/` だけだと `src/yonkomatic/state/` まで巻き込んでしまう。
+`.gitignore` の `/scenarios/`, `/output/`, `/state/`, `/tmp/` は **先頭 `/` 必須**。`state/` だけだと `src/yonkomatic/state/` まで巻き込んでしまう。
+
+## 出力ディレクトリのルール
+
+検証用の出力は **production-bound** と **ephemeral** の二階層で分離する。各セッションで出力先がぶれないように厳守。
+
+- **`output/`** — production-bound。`publish` / `publish-today` の archive、`batch-fetch-images` の preflight。CLI が自動運用で書き込む場所、人手で scratch を置かない:
+  - `output/archive/{date}.{png,yaml}`
+  - `output/preflight/{week}/ep{N}.png`
+- **`tmp/`** — 検証・実験。すべて gitignored、人手で気軽に消して良い:
+  - `tmp/verify/{cmd}/{YYYYMMDD-HHMMSS}/` — `test panel` / `test image` のデフォルト出力先 (ラン毎に別ディレクトリ、昇順 lexicographic で chronological)。各ディレクトリ内は `image.png` + `panel-prompt.txt` + `image-prompt.txt` のフラット構成
+  - `tmp/experiments/{YYYYMMDD}-{tag}/` — A/B 比較や手書きシナリオなど topic ごとの実験。日付 prefix で昇順整列
+
+`test panel --output ...` で個別パスを指定すれば従来どおり明示先に書き出される (デフォルトを変えただけで `--output` 指定時の挙動は同じ)。
 
 ## コーディング規約 / コミット
 

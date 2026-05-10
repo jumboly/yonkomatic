@@ -325,17 +325,19 @@ def test_image(
         "-r",
         help="Optional reference images (PNG/JPEG/WebP). Can be repeated.",
     ),
-    output: Path = typer.Option(
-        Path("output/test-image.png"),
+    output: Path | None = typer.Option(
+        None,
         "--output",
         "-o",
-        help="Where to save the generated image.",
+        help="Where to save the generated image. "
+        "Defaults to tmp/verify/test-image/{YYYYMMDD-HHMMSS}/image.png.",
     ),
     config_path: Path = typer.Option(Path("config.yaml"), "--config"),
     image_model: ImageModelOption = None,
 ) -> None:
     """Generate one image with OpenAI and save it locally."""
     cfg = _apply_cli_overrides(load_config(config_path), image_model=image_model)
+    output = output or _default_verify_output("test-image")
     tracker = UsageTracker()
     openai = _build_openai_client(cfg, usage_tracker=tracker)
     result = _run_openai_image(cfg, openai, prompt=prompt, refs=refs)
@@ -388,11 +390,12 @@ def test_panel(
         "-r",
         help="Extra reference images merged with auto-collected images/.",
     ),
-    output: Path = typer.Option(
-        Path("output/test-panel.png"),
+    output: Path | None = typer.Option(
+        None,
         "--output",
         "-o",
-        help="Where to save the generated 4-panel image.",
+        help="Where to save the generated 4-panel image. "
+        "Defaults to tmp/verify/test-panel/{YYYYMMDD-HHMMSS}/image.png.",
     ),
     config_path: Path = typer.Option(Path("config.yaml"), "--config"),
     text_model: TextModelOption = None,
@@ -411,6 +414,7 @@ def test_panel(
         image_model=image_model,
         image_size=image_size,
     )
+    output = output or _default_verify_output("test-panel")
 
     episode = _load_yaml_model(scenario_path, ScenarioEpisode)
     console.print(f"loaded scenario: [cyan]{episode.title}[/cyan] ({len(episode.panels)} panels)")
@@ -449,16 +453,27 @@ def test_panel(
     _print_usage_summary(tracker)
 
 
+def _default_verify_output(command: str) -> Path:
+    """Default output path for ad-hoc verify commands.
+
+    Format: ``tmp/verify/<command>/<YYYYMMDD-HHMMSS>/image.png`` — chronologically
+    sortable so ``ls`` lists runs ascending and the latest is the bottom entry.
+    """
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return Path(f"tmp/verify/{command}/{ts}/image.png")
+
+
 def _write_rendered_prompts(
     output: Path,
     *,
     panel_rendered: RenderedPrompt,
     image_prompt: str,
 ) -> None:
-    """Drop the rendered panel prompt + the resulting image prompt next to the output PNG."""
-    panel_path = output.with_suffix(".panel-prompt.txt")
-    image_path = output.with_suffix(".image-prompt.txt")
-    panel_path.parent.mkdir(parents=True, exist_ok=True)
+    """Drop the rendered panel prompt + the resulting image prompt in the output dir."""
+    out_dir = output.parent
+    panel_path = out_dir / "panel-prompt.txt"
+    image_path = out_dir / "image-prompt.txt"
+    out_dir.mkdir(parents=True, exist_ok=True)
     panel_path.write_text(panel_rendered.as_combined_text(), encoding="utf-8")
     image_path.write_text(image_prompt, encoding="utf-8")
     console.print(f"  wrote panel prompt: [dim]{panel_path}[/dim]")
