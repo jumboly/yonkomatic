@@ -108,6 +108,13 @@ ImageModelOption = Annotated[
         help="Override ai.image_model for this run (e.g. gpt-image-2).",
     ),
 ]
+ImageSizeOption = Annotated[
+    str | None,
+    typer.Option(
+        "--image-size",
+        help="Override ai.image_size for this run (e.g. 1152x1536).",
+    ),
+]
 TextModelOption = Annotated[
     str | None,
     typer.Option(
@@ -122,15 +129,18 @@ def _apply_cli_overrides(
     *,
     text_model: str | None = None,
     image_model: str | None = None,
+    image_size: str | None = None,
 ) -> Config:
     """Merge CLI flag overrides into cfg via sub-model copy."""
     updates: dict[str, Any] = {}
-    if text_model is not None or image_model is not None:
+    if text_model is not None or image_model is not None or image_size is not None:
         ai_updates: dict[str, Any] = {}
         if text_model is not None:
             ai_updates["text_model"] = text_model
         if image_model is not None:
             ai_updates["image_model"] = image_model
+        if image_size is not None:
+            ai_updates["image_size"] = image_size
         updates["ai"] = cfg.ai.model_copy(update=ai_updates)
     return cfg.model_copy(update=updates) if updates else cfg
 
@@ -387,6 +397,7 @@ def test_panel(
     config_path: Path = typer.Option(Path("config.yaml"), "--config"),
     text_model: TextModelOption = None,
     image_model: ImageModelOption = None,
+    image_size: ImageSizeOption = None,
     save_rendered: bool = typer.Option(
         True,
         "--save-rendered/--no-save-rendered",
@@ -395,7 +406,10 @@ def test_panel(
 ) -> None:
     """Run the full image pipeline once: scenario → prompt (text LLM) → image."""
     cfg = _apply_cli_overrides(
-        load_config(config_path), text_model=text_model, image_model=image_model
+        load_config(config_path),
+        text_model=text_model,
+        image_model=image_model,
+        image_size=image_size,
     )
 
     episode = _load_yaml_model(scenario_path, ScenarioEpisode)
