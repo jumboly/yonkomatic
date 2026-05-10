@@ -9,12 +9,14 @@ AI が毎日 4 コマ漫画を描き、Slack / 静的サイトへ自動投稿す
 
 ## Demo
 
-**ライブデモ** — このリポジトリを fork して 1 日 1 話の自動投稿が走り続けている公開リポジトリ:
+**ライブデモ** — upstream を mirror した独立リポジトリで 1 日 1 話の自動投稿が走り続けています:
 
 - ライブサイト: <https://www.jumboly.jp/yonkomatic-demo/>
 - demo リポジトリ: <https://github.com/jumboly/yonkomatic-demo>
 
 upstream (このリポジトリ) と同じコードベースに、後述のサンプル素材だけを使い、毎週月〜日に新しい 4 コマが追加されます。挙動・出力品質・運用コストの実例として参照してください。
+
+> **demo の運用形態**: GitHub は同一アカウントが親リポジトリと fork を両方所有することを許可しないため、`jumboly/yonkomatic-demo` は GitHub UI 上の fork ではなく **upstream を git pull で同期する独立 mirror** として運用しています。本来想定する利用者の運用 (別アカウントから fork する) と挙動は同じで、`Sync fork` ボタンの代わりに手動 `git pull upstream main` で追従します。
 
 実際に gpt-image-2 が出力した本番品質サンプル (W21、960×1280):
 
