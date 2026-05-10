@@ -146,14 +146,27 @@ def _apply_cli_overrides(
     return cfg.model_copy(update=updates) if updates else cfg
 
 
+_MIME_EXT_OVERRIDE = {"image/jpeg": ".jpg"}
+
+
 def _save_image(output: Path, image_bytes: bytes, mime_type: str) -> Path:
     """Save image bytes, fixing the extension to match the actual MIME type.
 
     Why: image APIs do not always honor a requested output format and may
     return JPEG when callers asked for ``.png`` — aligning extension with
     content avoids downstream tools (Slack, browsers) misreading the file.
+
+    Why the override: ``mimetypes.guess_extension('image/jpeg')`` returns
+    different values across platforms (``.jpe`` on some Linux Pythons,
+    ``.jpg`` on macOS) depending on the order in which the type table was
+    registered. We pin to ``.jpg`` so output paths are identical in CI and
+    local runs.
     """
-    actual_ext = mimetypes.guess_extension(mime_type) or ".bin"
+    actual_ext = (
+        _MIME_EXT_OVERRIDE.get(mime_type)
+        or mimetypes.guess_extension(mime_type)
+        or ".bin"
+    )
     if output.suffix.lower() != actual_ext.lower():
         output = output.with_suffix(actual_ext)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -202,6 +215,8 @@ def _build_openai_client(
         text_model=cfg.ai.text_model,
         image_model=cfg.ai.image_model,
         usage_tracker=usage_tracker,
+        image_format=cfg.ai.image_format,
+        image_compression=cfg.ai.image_compression,
     )
 
 
@@ -708,9 +723,16 @@ def _publish_episode_pipeline(
 
     if preflight_path is not None:
         console.print(f"  using preflight image: [dim]{preflight_path}[/dim]")
+        # Why guess from the filename rather than hardcoding image/png:
+        # batch-fetch-images writes preflights with whatever extension matches
+        # ai.image_format (jpeg / webp / png), and downstream consumers
+        # (Slack upload, archive YAML metadata) need the true MIME.
+        preflight_mime = (
+            mimetypes.guess_type(preflight_path.name)[0] or "application/octet-stream"
+        )
         image_result = ImageResult(
             image_bytes=preflight_path.read_bytes(),
-            mime_type="image/png",
+            mime_type=preflight_mime,
         )
 
         # Carry the prompts that produced this image into the archive so
@@ -936,11 +958,15 @@ def _find_preflight_image(week: str | None, episode_number: int) -> Path | None:
     Preflight images are pre-rendered by ``batch-fetch-images`` from the
     weekly batch. ``publish-today`` consults this so the daily cron can
     skip a sync image generation when the batch already produced one.
+
+    Glob over extensions because the configured ``ai.image_format`` may be
+    png / jpeg / webp; using a fixed suffix would mask perfectly good
+    preflights and force a wasteful sync regeneration.
     """
     if week is None:
         return None
-    candidate = _default_preflight_dir(week) / f"ep{episode_number}.png"
-    return candidate if candidate.exists() else None
+    matches = sorted(_default_preflight_dir(week).glob(f"ep{episode_number}.*"))
+    return matches[0] if matches else None
 
 
 def _load_batch_job_meta(

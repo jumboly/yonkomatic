@@ -9,7 +9,7 @@ configuration objects stay free of secrets.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
@@ -34,6 +34,11 @@ class AIConfig(BaseModel):
     image_model: str = "gpt-image-1"
     # OpenAI image API takes pixel sizes (e.g. "1024x1024", "1024x1536", "1536x1024").
     image_size: str = "1024x1536"
+    # JPEG q=90 を本番採用: 4 コマ漫画 (assets/demo 実測) で
+    # PNG 比 -83% / 線・フキダシの劣化なし。WebP 不採用は Slack
+    # プレビューが webp 非対応のクライアントを残すため。
+    image_format: Literal["png", "jpeg", "webp"] = "jpeg"
+    image_compression: int = Field(default=90, ge=0, le=100)
     max_image_retries: int = 3
     openai_api_key_env: str = "OPENAI_API_KEY"
 

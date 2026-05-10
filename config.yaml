@@ -18,6 +18,10 @@ ai:
   # 表示サイズで dialogue + SFX が読み取れる必要十分な解像度。
   # 印刷品質を狙うなら 1536x2048 (sync $0.27/枚, batch $0.137/枚) に切替。
   image_size: "960x1280"
+  # 出力フォーマット。jpeg + 90 で PNG 比 -83% / 視認劣化なし
+  # (assets/demo 実測)。印刷向けに無圧縮を要するときだけ png に戻す。
+  image_format: jpeg
+  image_compression: 90
   max_image_retries: 3
   openai_api_key_env: OPENAI_API_KEY
 
