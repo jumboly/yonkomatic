@@ -9,10 +9,10 @@
 ## 現在地
 
 - **完了**: Step 1〜4, **Step 5 全部** (5a/5b/5c/5d + simplify), **Step 5e** (実装 + A/B 検証、本番採用見送り), **Step 6** (テンプレ化 + OpenAI 切替 + 構造刷新), **Step 6.5** (gpt-image-2 → 960x1280 本番採用), **Step 6.6** (Actions の batch 化 — 実装は Step 6.5 と一体で完了済み)、batch CLI、モデル別ガイダンス機構 (scenario / panel-prompt 両 LLM)
-- **次**: Step 6.7 (batch 失敗時の自動リトライ) → Step 7 (OSS 公開準備、**運用ディレクトリ集約**を含む)
+- **次**: Step 7 (OSS 公開準備 — fork 前提運用フロー記述 + private fork 作成 + Step 6.7 自動リトライ実装 + 運用ディレクトリ集約)
 - **ブロッカー**: なし
 
-最終更新: 2026-05-10 (Step 6.6 を実態に合わせて ✅ に整合化、Step 6.7 を切り出し、Step 7 に運用ディレクトリ集約を追加。live ブランチを履歴ごと削除 + main 起点で新規作成、Default branch = main に切替)
+最終更新: 2026-05-10 (運用方針を「上流リポ = テンプレ専用、自前 fork で運用」に転換。live ブランチ削除、Default = main 一本化、両 workflow の cron schedule をコメントアウトして上流での自動実行を停止 — 手動 `workflow_dispatch` のみ可)
 
 ### 次セッションの再開タスク (Step 6.5 余波)
 
@@ -381,6 +381,7 @@ yonkomatic batch-fetch-images --week 2026-W21
 
 新しい決定が出たら頭に追加。古いものは削除せず残す。
 
+- **2026-05-10 (運用方針転換: 上流テンプレ専用化 + fork 運用)** 同日中に「main → live → main」と Default branch を行き来した試行を経て、最終方針を「**上流リポ (`jumboly/yonkomatic`) はテンプレ専用、自前運用は private fork で行う**」に確定。理由: live と main の二重運用は手動 sync / `.gitignore` 緩和の merge 競合 / 二重の責務管理が面倒で、利用者と作者が同じパターン (fork → main で運用) で動かせる方が README/SETUP が単純化される。本コミットで実施: (a) live ブランチ削除 (remote + local)、Default = main、(b) 両 workflow (`weekly-scenarios.yml` / `daily-publish.yml`) の `schedule:` をコメントアウトして上流での cron 自動実行を停止 (`workflow_dispatch` は残し手動実行は可)、(c) 上流テンプレでは Slack API コール / OpenAI API コール共に走らない暫定運用が確立。次のステップ: Step 7 で README/SETUP に fork 前提の運用フロー (Secrets 設定 / `.gitignore` 緩和 / cron 有効化) を記述、その後 private fork を作成して動作確認。
 - **2026-05-10 (Default branch を live に切り戻した)** 上記の「Default = main」直後に Default を live に切り戻した (`gh repo edit --default-branch live`)。cron は live の workflow で走る運用に戻り、main は OSS テンプレ的に「fork されて使われる基本形」、live は「自前の cron 運用先」として位置付けを分離。新 live は main と同じ HEAD で `.gitignore` 緩和もなし、bot commit は引き続き skip され Slack API コールのみ走る暫定運用は変わらない (Step 7 で運用ディレクトリ集約 + .gitignore 設計と一緒に再構築)。
 - **2026-05-10 (Step 6.6 整合化 + Step 6.7 切り出し + Step 7 拡張)** Step 6.6 のスコープ 4 項目は実装としては Step 6.5 と同時 (`c829994` 「feat: 週次バッチ生成 + 日次 publish の preflight 自動採用」) に組み込まれていたため ROADMAP を実態に合わせて ✅ に整合化。残課題「batch 失敗時のリトライ」を Step 6.7 に切り出し、ユーザー指定方針 (当日無ければ sync、翌日以降を batch 再投入) をスコープとして明文化。実装は実運用で失敗ケースの実態を見てから着手する。Step 7 (OSS 公開準備) のスコープに「運用ディレクトリ集約」(`scenarios/state/output/docs` を 1 ディレクトリにまとめる) を追加。
 - **2026-05-10 (live ブランチを履歴ごと削除 + 新規作成、Default = main)** 旧 live が Step 5d 時代の汚れた状態 (config: text_rendering / anthropic+google deps / 旧 4 フォルダ content) で残っていたため、`gh repo edit --default-branch main` → `git push origin --delete live` → `git branch -D live` で remote + local + Default branch 設定を整理。直後に main 起点で `git checkout -b live && git push -u origin live` で新規 live を作成 (HEAD は main と同一)。利用者カスタム (`.gitignore` 緩和等) は Step 7 (運用ディレクトリ集約) で再設計してから乗せる。Default branch は main のままなので、cron は main の workflow で走り、main の `.gitignore` で scenarios/state/output/docs が ignore のため bot commit は skip される (Slack 投稿の API コールは走る点に注意、Step 7 まで暫定)。

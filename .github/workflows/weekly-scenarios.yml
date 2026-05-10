@@ -4,9 +4,13 @@ name: weekly-scenarios
 # Why "+1 day" for the week: Sun 23:00 JST is the last hour of the current
 # ISO week, so we generate scenarios for the *next* week which starts the
 # following Monday (when daily-publish first reads them).
+#
+# Note: schedule is commented out on the upstream template repo so cron does
+# not fire here. After forking, uncomment the schedule line in your fork's
+# main branch to enable automatic weekly generation. See SETUP.md.
 on:
-  schedule:
-    - cron: "0 14 * * 0"
+  # schedule:
+  #   - cron: "0 14 * * 0"
   workflow_dispatch:
 
 permissions:
