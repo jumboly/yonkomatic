@@ -1,6 +1,6 @@
 name: daily-publish
 
-# Why 00:00 UTC = 09:00 JST: SPEC schedule.publish_time.
+# Why 00:00 UTC: 09:00 JST publish window (see ROADMAP "段階的実装").
 on:
   schedule:
     - cron: "0 0 * * *"

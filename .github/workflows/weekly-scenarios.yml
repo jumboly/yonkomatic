@@ -1,6 +1,6 @@
 name: weekly-scenarios
 
-# Why Sun 14:00 UTC = 23:00 JST: SPEC schedule.scenario_generation_time.
+# Why Sun 14:00 UTC: Sun 23:00 JST is the last hour of the current ISO week.
 # Why "+1 day" for the week: Sun 23:00 JST is the last hour of the current
 # ISO week, so we generate scenarios for the *next* week which starts the
 # following Monday (when daily-publish first reads them).

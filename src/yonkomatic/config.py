@@ -32,10 +32,8 @@ class ContentConfig(BaseModel):
 class AIConfig(BaseModel):
     text_model: str = "gpt-5.4"
     image_model: str = "gpt-image-1"
-    # OpenAI image API expects pixel sizes (e.g. "1024x1536") rather than
-    # Gemini's "1K"/"2K" tiers. 1024x1536 is the native 3:4 portrait option.
+    # OpenAI image API takes pixel sizes (e.g. "1024x1024", "1024x1536", "1536x1024").
     image_size: str = "1024x1536"
-    aspect_ratio: str = "3:4"
     max_image_retries: int = 3
     openai_api_key_env: str = "OPENAI_API_KEY"
 
@@ -65,9 +63,6 @@ class PublishersConfig(BaseModel):
 
 class ScheduleConfig(BaseModel):
     timezone: str = "Asia/Tokyo"
-    publish_time: str = "09:00"
-    scenario_generation_dow: str = "sunday"
-    scenario_generation_time: str = "23:00"
 
 
 class NewsConfig(BaseModel):
@@ -75,7 +70,6 @@ class NewsConfig(BaseModel):
     feeds: list[str] = Field(default_factory=list)
     max_items_per_feed: int = 10
     lookback_days: int = 7
-    language: str = "ja"
 
 
 class Config(BaseModel):

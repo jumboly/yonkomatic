@@ -4,14 +4,13 @@
 post episode N today?". The format is intentionally small so a human
 operator can fix it by hand if the cron job goes off the rails.
 
-``auto_commit`` is provided for daily-cron use; ``yonkomatic publish``
-itself does not call it.
+Committing state.yaml back to the repo is done by the GitHub Actions
+workflow via shell ``git`` — this module only handles read/write.
 """
 
 from __future__ import annotations
 
 import os
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -74,25 +73,3 @@ class StateStore:
             data.current_week_index = entry.week
         self.save(data)
         return data
-
-    def auto_commit(self, message: str, *, paths: list[Path] | None = None) -> bool:
-        """Stage state.yaml (and given paths) and commit. Returns True on success.
-
-        Why no exception: the daily cron should never abort over a commit
-        failure — the publish itself already happened. Caller logs the
-        boolean and moves on.
-        """
-        targets = [str(self.path)]
-        if paths:
-            targets.extend(str(p) for p in paths)
-
-        try:
-            subprocess.run(["git", "add", *targets], check=True, capture_output=True)
-            subprocess.run(
-                ["git", "commit", "-m", message],
-                check=True,
-                capture_output=True,
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return False
-        return True

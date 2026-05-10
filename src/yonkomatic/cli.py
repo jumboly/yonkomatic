@@ -534,7 +534,6 @@ def _write_archive(
             "text_model": cfg.ai.text_model,
             "image_model": cfg.ai.image_model,
             "image_size": cfg.ai.image_size,
-            "aspect_ratio": cfg.ai.aspect_ratio,
         },
         "rendered_panel_prompt": rendered_panel.as_combined_text(),
         "rendered_image_prompt": rendered_image_prompt,

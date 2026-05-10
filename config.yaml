@@ -14,10 +14,8 @@ ai:
   # OpenAI Image Generation モデル。最新 / 高品質を狙うなら gpt-image-2 に。
   image_model: "gpt-image-1"
   # OpenAI 画像 API は px サイズ指定 ("1024x1024" / "1024x1536" / "1536x1024")。
-  # 1024x1536 が縦長 3:4 (4 コマ漫画) のネイティブサイズ。
+  # gpt-image-2 ならカスタムサイズ可 (各辺 16 の倍数 / 最大 3840px / 比率 3:1 以下)。
   image_size: "1024x1536"
-  # 表示用の比率記述。API には image_size 経由で渡る。
-  aspect_ratio: "3:4"
   max_image_retries: 3
   openai_api_key_env: OPENAI_API_KEY
 
@@ -38,10 +36,9 @@ publishers:
     base_url: "" # GitHub Pages 等の公開URL
 
 schedule:
+  # publish-today / generate-scenarios の "今日" の判定に使う TZ。
+  # 実際の cron 時刻は .github/workflows/*.yml に定義されている。
   timezone: Asia/Tokyo
-  publish_time: "09:00"
-  scenario_generation_dow: sunday
-  scenario_generation_time: "23:00"
 
 news:
   enabled: true
@@ -51,4 +48,3 @@ news:
     - https://news.yahoo.co.jp/rss/topics/sports.xml
   max_items_per_feed: 10
   lookback_days: 7
-  language: ja

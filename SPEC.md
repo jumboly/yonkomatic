@@ -155,7 +155,6 @@ ai:
   scenario_model: claude-sonnet-4-6
   image_model: gemini-3.1-flash-image-preview
   image_size: "2K"                 # 512 | 1K | 2K | 4K
-  aspect_ratio: "3:4"              # 縦長4コマ
   max_image_retries: 3
 
 publishers:
@@ -172,10 +171,7 @@ publishers:
     base_url: ""                   # GitHub Pages 等の公開URL
 
 schedule:
-  timezone: Asia/Tokyo
-  publish_time: "09:00"
-  scenario_generation_dow: sunday
-  scenario_generation_time: "23:00"
+  timezone: Asia/Tokyo               # cron 時刻は .github/workflows/*.yml で定義
 
 news:
   enabled: true
@@ -185,7 +181,6 @@ news:
     - https://news.yahoo.co.jp/rss/topics/sports.xml
   max_items_per_feed: 10
   lookback_days: 7
-  language: ja
 
 text_rendering:
   mode: fallback                   # always | fallback | never
@@ -299,7 +294,6 @@ response = client.models.generate_content(
     config=types.GenerateContentConfig(
         response_modalities=["IMAGE"],
         image_config=types.ImageConfig(
-            aspect_ratio="3:4",
             image_size="2K",
         ),
     ),
