@@ -71,7 +71,7 @@ API キーやチャンネル ID 等の機密値は **設定オブジェクトに
 - ❌ API キー、`scenarios/` `output/` `state/` の実運用データ
 - `content/images/` の画像はプロジェクトが OSS ライセンス下で配布する用に保有するものに限定する。fork 先で利用者が自前の画像に差し替える想定 (`.gitattributes` の `content/* merge=ours` で upstream 更新時の衝突を回避)
 
-`.gitignore` の `/scenarios/`, `/output/`, `/state/`, `/tmp/` は **先頭 `/` 必須**。`state/` だけだと `src/yonkomatic/state/` まで巻き込んでしまう。
+`.gitignore` の `/scenarios`, `/output`, `/state`, `/docs`, `/tmp/`, `/.gh-pages/` は **先頭 `/` 必須**。`state/` だけだと `src/yonkomatic/state/` まで巻き込んでしまう。**末尾スラッシュの有無で意味が変わる**: `/state/` はディレクトリ専用、`/state` はファイル/ディレクトリ/symlink すべてマッチ。CI が張る symlink (`state -> .gh-pages/state`) を捕捉するため運用パスは末尾なしを採用している。
 
 ## 出力ディレクトリのルール
 
@@ -85,6 +85,12 @@ API キーやチャンネル ID 等の機密値は **設定オブジェクトに
   - `tmp/experiments/{YYYYMMDD}-{tag}/` — A/B 比較や手書きシナリオなど topic ごとの実験。日付 prefix で昇順整列
 
 `test panel --output ...` で個別パスを指定すれば従来どおり明示先に書き出される (デフォルトを変えただけで `--output` 指定時の挙動は同じ)。
+
+### CI 上の出力 (gh-pages worktree)
+
+CI workflow (`.github/workflows/{weekly-scenarios,daily-publish}.yml`) は checkout 直後に `git worktree add .gh-pages gh-pages` で orphan branch をぶら下げ、`scenarios/` `state/` `output/` `docs/` の 4 つを `.gh-pages/` 配下への symlink に置き換える。CLI コマンドは現状の相対パス (`Path("output/archive")` など) のまま無改修で `.gh-pages/` に書き込む。bot commit / push は `.gh-pages/` 内で `git push origin gh-pages` する形。
+
+ローカル開発では symlink を張らず素のディレクトリで動かす想定。`uv run yonkomatic publish-today --dry-run` を root で叩けば従来どおり main ルート直下に `scenarios/` `state/` `output/` `docs/` ができるが、`.gitignore` で全部無視されるので `git status` を汚さない。
 
 ## コーディング規約 / コミット
 

@@ -19,7 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Why fetch-depth: 0: `git pull --rebase` against the gh-pages branch
+      # below needs full history to merge cleanly without unrelated-histories
+      # surprises.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v3
@@ -28,6 +33,45 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --frozen
+
+      # Why a separate gh-pages worktree: cron artefacts (scenarios/, state/,
+      # output/, docs/) live on an orphan branch so main stays clean for
+      # forks. The worktree is the write target; symlinks below redirect the
+      # CLI's relative paths into it without touching cli.py.
+      - name: Prepare gh-pages worktree
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin gh-pages 2>/dev/null || true
+          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git worktree add .gh-pages gh-pages
+          else
+            # First run on this fork — bootstrap the orphan branch with a
+            # placeholder so Pages has something to render before this very
+            # publish overwrites docs/index.html.
+            git worktree add --detach .gh-pages
+            cd .gh-pages
+            git checkout --orphan gh-pages
+            git rm -rf . 2>/dev/null || true
+            cat > index.html <<'HTML'
+          <!doctype html>
+          <title>yonkomatic</title>
+          <p>first publish in progress &mdash; see
+          <a href="../../actions">workflow runs</a>.</p>
+          HTML
+            git add index.html
+            git commit -m "init: orphan gh-pages branch"
+            git push -u origin gh-pages
+            cd ..
+          fi
+
+      - name: Wire runtime symlinks
+        run: |
+          mkdir -p .gh-pages/{scenarios,state/batches,output/archive,output/preflight,docs}
+          ln -sfn .gh-pages/scenarios scenarios
+          ln -sfn .gh-pages/state     state
+          ln -sfn .gh-pages/output    output
+          ln -sfn .gh-pages/docs      docs
 
       - name: Compute today's ISO week
         id: week
@@ -56,9 +100,14 @@ jobs:
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
         run: uv run yonkomatic publish-today
 
-      - name: Commit and push state + site updates
+      - name: Commit and push to gh-pages
         if: always()
         run: |
+          if [ ! -d .gh-pages ]; then
+            echo "gh-pages worktree was not prepared; skipping commit"
+            exit 0
+          fi
+          cd .gh-pages
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # Why per-path guard: a fresh user branch may not yet have docs/
@@ -72,8 +121,8 @@ jobs:
           else
             git commit -m "bot: published $(TZ=Asia/Tokyo date +%Y-%m-%d)"
             # Why pull --rebase --autostash before push: weekly-scenarios
-            # may have advanced main between checkout and push; without
-            # this the daily push would 403 on non-fast-forward.
-            git pull --rebase --autostash
-            git push
+            # may have advanced gh-pages between worktree add and push;
+            # without this the daily push would 403 on non-fast-forward.
+            git pull --rebase --autostash origin gh-pages
+            git push origin gh-pages
           fi

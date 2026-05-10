@@ -33,18 +33,22 @@ env/
 .DS_Store
 Thumbs.db
 
-# yonkomatic runtime data — generated on user branches, never on main.
+# yonkomatic runtime data — written by the CI workflows into the gh-pages
+# worktree, or to the repo root during local dev. Never commit either.
 # Leading slash anchors to repo root so it does not match src/yonkomatic/state/.
-/scenarios/
-/output/
-/state/
 /tmp/
 
-# Generated static site under docs/ (Pages publishes from /docs).
-# Doc files at the repo root (ROADMAP.md / SPEC.md) are not affected.
-/docs/index.html
-/docs/posts/
-/docs/images/
-/docs/css/
-/docs/.posts-index.json
+# CI workflows (.github/workflows/) run `git worktree add .gh-pages gh-pages`
+# to expose the orphan branch where all generated artefacts live.
+/.gh-pages/
+
+# CI workflows redirect the CLI's relative output paths into .gh-pages/* via
+# symlinks at the repo root. Without trailing slash these patterns match
+# files, directories, and symlinks alike — so a stray `git add docs` cannot
+# accidentally check the symlink itself into main. src/yonkomatic/state/ is
+# unaffected because it is not at the repo root.
+/scenarios
+/state
+/output
+/docs
 
