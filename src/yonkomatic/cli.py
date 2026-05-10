@@ -678,11 +678,10 @@ def _publish_episode_pipeline(
 
     if preflight_path is not None:
         console.print(f"  using preflight image: [dim]{preflight_path}[/dim]")
-        image_bytes = preflight_path.read_bytes()
-        mime_type = (
-            mimetypes.guess_type(str(preflight_path))[0] or "image/png"
+        image_result = ImageResult(
+            image_bytes=preflight_path.read_bytes(),
+            mime_type="image/png",
         )
-        image_result = ImageResult(image_bytes=image_bytes, mime_type=mime_type)
 
         # Carry the prompts that produced this image into the archive so
         # daily archives stay self-describing even when the API was not
@@ -996,32 +995,48 @@ def batch_submit_images(
         builtin_dir=_builtin_templates_dir(),
     )
 
-    jobs: list[BatchImageJob] = []
-    job_meta: list[dict[str, Any]] = []
-    for ep in week_data.episodes:
+    def _render_one(ep: ScenarioEpisode) -> tuple[BatchImageJob, dict[str, Any]]:
         cid = f"{week}-ep{ep.episode_number}"
-        console.print(
-            f"rendering prompt for [cyan]{cid}[/cyan] 「{ep.title}」 "
-            f"(via {cfg.ai.text_model})…"
+        image_prompt, rendered = build_image_prompt(
+            episode=ep,
+            pack=pack,
+            openai=openai,
+            template_path=panel_template,
+            image_model=cfg.ai.image_model,
         )
-        with _fail_on(f"prompt generation failed for {cid}"):
-            image_prompt, rendered = build_image_prompt(
-                episode=ep,
-                pack=pack,
-                openai=openai,
-                template_path=panel_template,
-                image_model=cfg.ai.image_model,
-            )
-        jobs.append(BatchImageJob(custom_id=cid, prompt=image_prompt))
-        job_meta.append(
+        return (
+            BatchImageJob(custom_id=cid, prompt=image_prompt),
             {
                 "custom_id": cid,
                 "episode_number": ep.episode_number,
                 "title": ep.title,
                 "rendered_panel_prompt": rendered.as_combined_text(),
                 "rendered_image_prompt": image_prompt,
-            }
+            },
         )
+
+    console.print(
+        f"rendering [cyan]{len(week_data.episodes)}[/cyan] prompts in parallel "
+        f"(via {cfg.ai.text_model})…"
+    )
+    # Why parallel: text completion latency dominates submit time (~2s × N).
+    # ThreadPoolExecutor matches the pattern in _run_publishers; UsageTracker.add
+    # is lock-guarded so concurrent records are safe. Order is preserved by
+    # submitting indexed and writing back into a pre-sized list.
+    rendered_jobs: list[tuple[BatchImageJob, dict[str, Any]] | None] = (
+        [None] * len(week_data.episodes)
+    )
+    with _fail_on("prompt generation failed"):
+        with ThreadPoolExecutor(max_workers=len(week_data.episodes)) as ex:
+            futures = {
+                ex.submit(_render_one, ep): i
+                for i, ep in enumerate(week_data.episodes)
+            }
+            for fut in as_completed(futures):
+                rendered_jobs[futures[fut]] = fut.result()
+
+    jobs: list[BatchImageJob] = [r[0] for r in rendered_jobs if r is not None]
+    job_meta: list[dict[str, Any]] = [r[1] for r in rendered_jobs if r is not None]
 
     console.print(
         f"submitting batch ({len(jobs)} jobs, {cfg.ai.image_model}, "

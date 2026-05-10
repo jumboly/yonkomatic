@@ -15,19 +15,50 @@ the JSON-only batch input format.
 from __future__ import annotations
 
 import base64
+import io
 import json
 import sys
-import tempfile
+import threading
 import time
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from openai import APIError, OpenAI, RateLimitError
 from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def resolve_model_profile(
+    table: dict[str, str], model: str, *, default: str
+) -> str:
+    """Look up a per-model profile string by exact id, then by prefix.
+
+    Used for both the scenario-writer guidance (``scenario/generator.py``)
+    and the panel-prompt-writer guidance (``panel/description.py``). The
+    prefix fallback lets snapshot-pinned ids like ``gpt-image-2-2026-04-21``
+    re-use the ``gpt-image-2`` entry without manual maintenance.
+    """
+    if model in table:
+        return table[model]
+    for key, text in table.items():
+        if model.startswith(key):
+            return text
+    return default
+
+
+_BatchStatusLiteral = Literal[
+    "validating",
+    "in_progress",
+    "finalizing",
+    "completed",
+    "failed",
+    "cancelled",
+    "expired",
+]
+_CallKind = Literal["text", "image"]
 
 
 # Per 1M-token rates for known models, standard tier (USD).
@@ -68,19 +99,27 @@ class ImageResult:
 @dataclass
 class CallRecord:
     model: str
-    kind: str  # "text" | "image"
+    kind: _CallKind
     usage: dict[str, int]  # normalised counters
     cost_usd: float | None  # None when the model is missing from _PRICES
 
 
 @dataclass
 class UsageTracker:
-    """Collects per-call usage and cost across one CLI command run."""
+    """Collects per-call usage and cost across one CLI command run.
+
+    Why the lock: ``add()`` may be called from worker threads when the
+    caller parallelises text completions (see ``batch-submit-images``).
+    ``list.append`` is atomic in CPython but ``summary()`` iterates and
+    must not race with concurrent appends.
+    """
 
     calls: list[CallRecord] = field(default_factory=list)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def add(self, record: CallRecord) -> None:
-        self.calls.append(record)
+        with self._lock:
+            self.calls.append(record)
 
     @property
     def total_cost_usd(self) -> float:
@@ -109,8 +148,16 @@ class UsageTracker:
 
 
 def _compute_cost(
-    model: str, kind: str, usage: dict[str, int], *, batch: bool = False
+    model: str, kind: _CallKind, usage: dict[str, int], *, batch: bool = False
 ) -> float | None:
+    """Estimate USD cost from token counts using ``_PRICES``.
+
+    Returns ``None`` when ``model`` is unpriced so the caller can show ``$?``
+    rather than misreport ``$0.00``. ``batch=True`` halves the total because
+    OpenAI's batch API discounts every rate category by 50% uniformly —
+    applying the multiplier to the sum gives the same answer as per-rate
+    halving and keeps the per-rate logic readable.
+    """
     rates = _PRICES.get(model)
     if rates is None:
         return None
@@ -130,9 +177,6 @@ def _compute_cost(
         cost += billable_image * rates.get("image_input", 0.0) / 1_000_000
         cost += cached * rates.get("image_cached_input", 0.0) / 1_000_000
         cost += usage.get("output_tokens", 0) * rates.get("image_output", 0.0) / 1_000_000
-    # Why halve at the end: OpenAI's batch API charges 50% across all rate
-    # categories uniformly, so applying a single multiplier on the total is
-    # equivalent and keeps per-rate logic readable.
     return cost * 0.5 if batch else cost
 
 
@@ -336,22 +380,16 @@ class OpenAIClient:
         by batch — yonkomatic's batch path skips reference images entirely.
         """
         jsonl = _image_batch_jsonl(jobs, model=self.image_model, size=size)
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=".jsonl", encoding="utf-8", delete=False
-        ) as fp:
-            fp.write(jsonl)
-            jsonl_path = Path(fp.name)
-        try:
-            with jsonl_path.open("rb") as f:
-                upload = self.client.files.create(file=f, purpose="batch")
-            batch = self.client.batches.create(
-                input_file_id=upload.id,
-                endpoint="/v1/images/generations",
-                completion_window="24h",
-            )
-            return batch.id
-        finally:
-            jsonl_path.unlink(missing_ok=True)
+        upload = self.client.files.create(
+            file=("batch.jsonl", io.BytesIO(jsonl.encode("utf-8"))),
+            purpose="batch",
+        )
+        batch = self.client.batches.create(
+            input_file_id=upload.id,
+            endpoint="/v1/images/generations",
+            completion_window="24h",
+        )
+        return batch.id
 
     def fetch_image_batch(self, batch_id: str) -> BatchStatus:
         """Look up a batch and download decoded images when it has completed.
@@ -457,7 +495,7 @@ class BatchStatus:
     """Snapshot of an OpenAI batch's progress + downloaded results when complete."""
 
     batch_id: str
-    status: str  # validating | in_progress | finalizing | completed | failed | cancelled | expired
+    status: _BatchStatusLiteral
     total: int
     completed: int
     failed: int

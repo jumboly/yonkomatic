@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from yonkomatic.ai.openai_client import OpenAIClient
+from yonkomatic.ai.openai_client import OpenAIClient, resolve_model_profile
 from yonkomatic.panel.description import ContentPack
 from yonkomatic.scenario.schema import ScenarioWeek
 from yonkomatic.template import RenderedPrompt, load_template, render
@@ -34,8 +34,8 @@ _TEMPERATURE = 0.8
 #   - developers.openai.com/cookbook/examples/multimodal/image-gen-models-prompting-guide
 #   - floatboat.ai/blog/gpt-image-2-manga-comic-workflow
 #   - openai.com/index/introducing-chatgpt-images-2-0
-# Update this table when OpenAI publishes new benchmarks or when our
-# own validation runs (ROADMAP "Step 6.5") shift the failure profile.
+# Update this table when OpenAI publishes new benchmarks or when our own
+# gpt-image-2 validation runs shift the failure profile.
 _IMAGE_MODEL_GUIDANCE: dict[str, str] = {
     "gpt-image-2": (
         "画像生成モデルは **gpt-image-2** (2026-04-21 リリース、`/v1/images/generations`) を使用します。"
@@ -80,15 +80,14 @@ _IMAGE_MODEL_GUIDANCE: dict[str, str] = {
 
 def _image_model_guidance(model: str) -> str:
     """Return capability guidance for ``model``; fall back by prefix then default."""
-    if model in _IMAGE_MODEL_GUIDANCE:
-        return _IMAGE_MODEL_GUIDANCE[model]
-    for key, text in _IMAGE_MODEL_GUIDANCE.items():
-        if model.startswith(key):
-            return text
-    return (
-        f"画像生成モデル (`{model}`) の能力プロフィールは未登録です。"
-        "汎用的なシナリオを書いてください: 1 パネル平均 1〜2 吹き出し、台詞は短めに、"
-        "各パネルの場面差 (時刻・場所・カメラ) を description に明確に書く。"
+    return resolve_model_profile(
+        _IMAGE_MODEL_GUIDANCE,
+        model,
+        default=(
+            f"画像生成モデル (`{model}`) の能力プロフィールは未登録です。"
+            "汎用的なシナリオを書いてください: 1 パネル平均 1〜2 吹き出し、台詞は短めに、"
+            "各パネルの場面差 (時刻・場所・カメラ) を description に明確に書く。"
+        ),
     )
 
 

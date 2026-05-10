@@ -23,7 +23,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from yonkomatic.ai.openai_client import OpenAIClient
+from yonkomatic.ai.openai_client import OpenAIClient, resolve_model_profile
 from yonkomatic.config import ContentConfig
 from yonkomatic.scenario.schema import Panel, ScenarioEpisode
 from yonkomatic.template import RenderedPrompt, load_template, render
@@ -35,9 +35,8 @@ _console = Console(stderr=True)
 # Prompt-engineering tactics for each image model. Sourced 2026-05-10 from
 # the OpenAI Cookbook (image-gen-models-prompting-guide), the manga workflow
 # write-up at floatboat.ai/blog/gpt-image-2-manga-comic-workflow, and our
-# own ROADMAP "Step 6.5" validation. Update when OpenAI publishes new
+# own gpt-image-2 validation runs. Update when OpenAI publishes new
 # guidance or when prompts that previously worked stop working.
-# Lookup: exact match first, then prefix match.
 _PANEL_PROMPT_GUIDANCE: dict[str, str] = {
     "gpt-image-2": (
         "The downstream image model is **gpt-image-2** (released 2026-04-21). "
@@ -110,16 +109,15 @@ _PANEL_PROMPT_GUIDANCE: dict[str, str] = {
 
 def _panel_prompt_guidance(model: str) -> str:
     """Return panel-prompt tactics for ``model``; fall back by prefix then default."""
-    if model in _PANEL_PROMPT_GUIDANCE:
-        return _PANEL_PROMPT_GUIDANCE[model]
-    for key, text in _PANEL_PROMPT_GUIDANCE.items():
-        if model.startswith(key):
-            return text
-    return (
-        f"The downstream image model (`{model}`) is not in the prompt-engineering "
-        "profile table. Use generic best practices: quote literal text in double quotes, "
-        "label panels sequentially (Panel 1 / Panel 2 / ...), repeat character anchors "
-        "verbatim per panel, and end with negative constraints (`no extra text, no logos`)."
+    return resolve_model_profile(
+        _PANEL_PROMPT_GUIDANCE,
+        model,
+        default=(
+            f"The downstream image model (`{model}`) is not in the prompt-engineering "
+            "profile table. Use generic best practices: quote literal text in double quotes, "
+            "label panels sequentially (Panel 1 / Panel 2 / ...), repeat character anchors "
+            "verbatim per panel, and end with negative constraints (`no extra text, no logos`)."
+        ),
     )
 
 
