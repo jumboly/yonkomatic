@@ -1227,6 +1227,7 @@ def generate_scenarios(
             pack=pack,
             week=target_week,
             template_path=scenario_template,
+            image_model=cfg.ai.image_model,
             news_headlines=headlines or None,
         )
 
