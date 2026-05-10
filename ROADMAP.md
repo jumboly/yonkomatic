@@ -8,11 +8,11 @@
 
 ## 現在地
 
-- **完了**: Step 1〜4, **Step 5 全部** (5a/5b/5c/5d + simplify), **Step 5e** (実装 + A/B 検証、本番採用見送り), **Step 6** (テンプレ化 + OpenAI 切替 + 構造刷新), **Step 6.5** (gpt-image-2 → 960x1280 本番採用、**W21 全 7 話で 7/7 完全一致を確証**), **Step 6.6** (Actions の batch 化 — 実装は Step 6.5 と一体で完了済み), **Step 7a** (生成物の gh-pages 分離 — workflow を gh-pages worktree + symlink 経由に切替、main からランタイムを完全分離), **Step 7b** (`batch-resubmit-missing` CLI + manifest `retries[]` + daily-publish への best-effort step 配線、上限 2 回・prompt reuse、ローカル 5 ケース目視 OK), **Step 7c** (CONTRIBUTING.md 新規作成 — fork 運用前提 + 開発ルール明文化、README から「貢献」節経由でリンク)、batch CLI、モデル別ガイダンス機構 (scenario / panel-prompt 両 LLM)、参考画像 LLM 告知配線
-- **次**: **Step 7d** (ユニットテスト + CI lint) または **Step 7e** (README リライト + デモ画像) を選んで着手 — Step 7 全体は 7a〜7h に分割済み (下記セクション参照)
+- **完了**: Step 1〜4, **Step 5 全部** (5a/5b/5c/5d + simplify), **Step 5e** (実装 + A/B 検証、本番採用見送り), **Step 6** (テンプレ化 + OpenAI 切替 + 構造刷新), **Step 6.5** (gpt-image-2 → 960x1280 本番採用、**W21 全 7 話で 7/7 完全一致を確証**), **Step 6.6** (Actions の batch 化 — 実装は Step 6.5 と一体で完了済み), **Step 7a** (生成物の gh-pages 分離 — workflow を gh-pages worktree + symlink 経由に切替、main からランタイムを完全分離), **Step 7b** (`batch-resubmit-missing` CLI + manifest `retries[]` + daily-publish への best-effort step 配線、上限 2 回・prompt reuse、ローカル 5 ケース目視 OK), **Step 7c** (CONTRIBUTING.md 新規作成 — fork 運用前提 + 開発ルール明文化、README から「貢献」節経由でリンク), **Step 7d** (pytest 6 ファイル / 44 ケース新設 — schema / state / panel / news / static_site / batch manifest をオフラインモック化、`.github/workflows/ci.yml` で PR + main push に lint+test、`[dependency-groups].dev` に統一)、batch CLI、モデル別ガイダンス機構 (scenario / panel-prompt 両 LLM)、参考画像 LLM 告知配線
+- **次**: **Step 7e** (README リライト + デモ画像) または **Step 7f** (SETUP.md 全面改訂) を選んで着手 — Step 7 全体は 7a〜7h に分割済み (下記セクション参照)
 - **ブロッカー**: Step 7a/7b の private fork 動作確認 (Step 7g 検証手順) は実環境がないと実施不可、コミット後に手動 dispatch で確認
 
-最終更新: 2026-05-10 (Step 7c 実装完了 — CONTRIBUTING.md 9 章構成で新規作成、Issue/PR テンプレは置かない方針、Code of Conduct は inline、README に「貢献」節を追加してリンク)
+最終更新: 2026-05-10 (Step 7d 実装完了 — pytest + pytest-mock を `[dependency-groups].dev` に集約、6 ファイル 44 ケースが offline で完走、`tests/` フラット構成、`.github/workflows/ci.yml` を PR + main push トリガーで新設)
 
 ### Step 6.5 余波の検証ログ (2026-05-10 W21 batch で 3 件すべて確証済み)
 
@@ -471,27 +471,32 @@ yonkomatic batch-fetch-images --week 2026-W21
 
 **影響ファイル**: `CONTRIBUTING.md` (新規), `README.md`
 
-#### ⏳ Step 7d — ユニットテスト + CI lint (1 セッション)
+#### ✅ Step 7d — ユニットテスト + CI lint (2026-05-10)
 
-**スコープ**: 現状空の `tests/` に pytest ベースのテスト。OpenAI / Slack はモック化。`.github/workflows/ci.yml` で `ruff check` + `pytest` を PR 時に走らせる。
+**実装サマリ**: `tests/` をフラット構成で新設し、6 ファイル 44 ケースの pytest を追加。OpenAI / Slack / RSS / ファイル I/O はすべて `pytest-mock` の `MagicMock(spec=...)` または `mocker.patch("...feedparser.parse")` でオフライン化、ローカル `uv run pytest` が約 0.5 秒で完走。`.github/workflows/ci.yml` を PR + main push トリガーで新設し、`uv run ruff check src/ tests/` + `uv run pytest` を 1 job に統合。dev deps は `[project.optional-dependencies]` を削除し `[dependency-groups].dev` に集約 (uv 流儀統一)、`[tool.pytest.ini_options]` に `testpaths = ["tests"]` を設定。
 
-**完了条件**:
-- 最低限のテスト群:
-  - `test_scenario_schema.py` — `ScenarioWeek` / `ScenarioEpisode` / `Dialogue` の Pydantic validate 境界
-  - `test_state_repo.py` — `StateStore` の atomic write / append / round-trip
-  - `test_panel_description.py` — `build_image_prompt` の組み立て (OpenAI モック)
-  - `test_news_fetcher.py` — feedparser モック、feed 単位の例外吸収
-  - `test_publisher_static_site.py` — Jinja2 出力の HTML 構造
-  - `test_batch_manifest.py` — `_load_batch_job_meta` / `_find_preflight_image` の 7b リトライ対応含む
-- `pyproject.toml` の `[dependency-groups]` に `dev` group + pytest
-- `.github/workflows/ci.yml` 新設 (PR + push 両 trigger、`uv run ruff check src/ tests/` + `uv run pytest`)
-- ローカル `uv run pytest` が緑
+**新規ファイル**:
+- `tests/test_scenario_schema.py` (7 ケース) — `Panel(index)` 1-4 境界、`ScenarioEpisode` の panels=4 厳守、`episode_number≥1`、`ScenarioWeek` の episodes 1-7 境界
+- `tests/test_state_repo.py` (7 ケース) — `StateStore` の load 不在/round-trip/atomic save (tempfile 残骸なし) / append round-trip / `current_week_index` の None 保持 / 親ディレクトリ自動作成
+- `tests/test_panel_description.py` (8 ケース) — `MagicMock(spec=OpenAIClient)` で complete を mock、内蔵 `panel_prompt.md` をレンダ、known/unknown model のガイダンス分岐、temperature の forwarding
+- `tests/test_news_fetcher.py` (8 ケース) — `feedparser.parse` を fully mock、enabled=False / feeds=[] / multi-feed flatten / max_items truncate / lookback フィルタ / pubdate なし採用 / 単一 feed 失敗の他 feed 続行 / socket timeout 復元
+- `tests/test_publisher_static_site.py` (8 ケース) — 1x1 PNG リテラルで実書き出し、5 ファイル生成 / 相対&絶対 URL / title&summary 含有 / date 重複 upsert / INDEX_LIMIT=30 切詰め / style.css 上書き禁止 / 拡張子保存
+- `tests/test_batch_manifest.py` (6 ケース) — `monkeypatch.chdir(tmp_path)` で CWD 隔離、week=None / manifest 不在 / 一致 / 不一致 / 空 manifest / Step 7b の `retries[]` 同居でも `jobs[]` のみ参照
+- `.github/workflows/ci.yml` — `astral-sh/setup-uv@v3` + `uv sync` + lint + test を 1 job 統合、Python matrix なし
 
-**影響ファイル**: `tests/__init__.py`, `tests/test_*.py` (6 本前後), `pyproject.toml`, `.github/workflows/ci.yml`, `CONTRIBUTING.md` (テスト実行手順追記)
+**確定した設計判断**:
+1. **dev deps は `[dependency-groups].dev` に統一** — `[project.optional-dependencies]` セクションごと削除。uv 流儀の単一ソース、PEP 735 準拠。
+2. **`tests/` はフラット構成** — モジュール構造に揃えたサブディレクトリは作らず `tests/test_*.py` 直下。6 ファイルでは見通しが良い。
+3. **`conftest.py` は作らない** — 共通 fixture は各ファイル内のローカルヘルパで十分、結合を増やさない。
+4. **OpenAI mock は `MagicMock(spec=OpenAIClient)`** — `mocker.patch("...OpenAIClient.complete")` よりテスト主体が明確、spec で API ドリフト検知。
+5. **feedparser patch 先は `yonkomatic.news.fetcher.feedparser.parse`** — import 元側を patch、ネットワーク漏れガード。
+6. **`_load_batch_job_meta` テストは `monkeypatch.chdir(tmp_path)` 必須** — 関数が CWD 相対 (`Path("state/batches/...")`) なのでリポジトリ実 state を読む事故を回避。
+7. **CI は PR + main push 両方をトリガー** — fork 利用者の PR でも作者の merge 後でも回る、OSS 慣習。
+8. **`uv sync` は `--frozen` なし** — 本コミットで `uv.lock` も再生成するため初回 PR は frozen 不可、daily-publish 側 (`uv sync --frozen`) との整合は次以降の PR の責務外。
 
-**未決事項**:
-1. coverage 計測 → **推奨: 初版では測らない** (緑/赤判定だけで十分)
-2. integration テスト (実 API) → **推奨: 置かない** (`uv run yonkomatic test panel/slack/news` が手動 integration として既存)
+**未決事項の確定値**:
+1. coverage 計測 → **未導入** (緑/赤判定で十分、CI を肥大化させない)
+2. integration テスト (実 API) → **未導入** (`uv run yonkomatic test panel/slack/news` が既存の手動 integration)
 
 #### ⏳ Step 7e — README リライト + Quick Start + デモ画像 (0.5 セッション)
 
@@ -561,6 +566,7 @@ yonkomatic batch-fetch-images --week 2026-W21
 
 新しい決定が出たら頭に追加。古いものは削除せず残す。
 
+- **2026-05-10 (Step 7d 実装完了)** `tests/` をフラット構成で新設、6 ファイル 44 ケースの pytest を追加。**確定した方針**: (1) **dev deps は `[dependency-groups].dev` に統一** — `[project.optional-dependencies]` セクションを削除し pytest/pytest-mock/ruff を移動 (uv 流儀の単一ソース、PEP 735 準拠)、(2) **`tests/` フラット構成** — モジュール構造に揃えたサブディレクトリは作らず `tests/test_*.py` 直下で見通し確保、(3) **`conftest.py` 作らない** — 共通 fixture は各ファイル内のローカルヘルパで十分、結合を避ける、(4) **OpenAI mock は `MagicMock(spec=OpenAIClient)`** — `mocker.patch("...complete")` よりテスト主体が明確、spec で API ドリフト検知、(5) **feedparser patch 先は `yonkomatic.news.fetcher.feedparser.parse`** (import 元側) — ネットワーク漏れ防止のためテスト全本で統一、(6) **`_load_batch_job_meta` テストは `monkeypatch.chdir(tmp_path)` 必須** — 関数が CWD 相対 (`Path("state/batches/...")`) のためリポジトリ実 state を読む事故を回避、(7) **CI は PR + main push 両トリガー** — fork 利用者の PR でも作者の merge 後でも回る、(8) **`uv sync` は `--frozen` なし** — 本コミットで `uv.lock` も再生成、daily-publish 側の frozen 整合は次以降の責務外、(9) **`[tool.pytest.ini_options]` に `testpaths = ["tests"]` のみ** — `addopts` / `asyncio_mode` / `filterwarnings` は最小起動で。**新規ファイル**: `tests/test_scenario_schema.py` (7) / `test_state_repo.py` (7) / `test_panel_description.py` (8) / `test_news_fetcher.py` (8) / `test_publisher_static_site.py` (8) / `test_batch_manifest.py` (6) / `.github/workflows/ci.yml`。**修正**: `pyproject.toml` (groups 統一 + pytest config) / `uv.lock` (再生成) / `CONTRIBUTING.md` §3-4,7 (lint コマンド + テスト節 + PR 流儀) / `CLAUDE.md` (lint+test コマンド例)。`uv run pytest` 0.46s で 44 passed、`uv run ruff check src/ tests/` 緑。**Step 7b retries 同居テスト 1 ケース追加** — `_load_batch_job_meta` が retries[].results 配下の custom_id を誤返却しない契約を固定。
 - **2026-05-10 (Step 7c 実装完了)** `CONTRIBUTING.md` を新規作成し、上流テンプレへの貢献ガイドを明文化。**確定した方針**: (1) **9 章構成** = 位置付けと貢献の範囲 / 開発環境 (uv) / Lint (`uv run ruff check src/`) / テスト (Step 7d 完了後追記の placeholder + 既存 `test slack/panel` を手動 integration として案内) / コーディング規約 (CLAUDE.md からの噛み砕き — WHY のみコメント / Step 番号は code に書かない / `typer.Exit` / `_fail_on` / `PublishResult(ok=False)`) / コミットメッセージ規約 (Conventional Commits 風 + **Co-Authored-By 禁止** を再掲、出典 §2026-05-08) / PR 流儀 (説明テンプレ「何を / なぜ / 動作確認」、lint 緑前提、レビュアー指名不要) / Issue & Discussions (バグのみ Issue、要望・質問は Discussions) / ライセンスと行動規範 (MIT + Contributor Covenant 相当を inline)、(2) **Issue / PR テンプレートは置かない** (テンプレ専用リポゆえ流入を絞る)、(3) **Code of Conduct は inline** (別ファイル化しない)、(4) **PR 流儀は contributor 向け基本ルールのみ** (ROADMAP/SPEC 更新義務は課さない、メンテナ向け規約は CLAUDE.md 既載)、(5) **Issue は再現性あるバグのみ受付**。`README.md` の「ライセンス」直前に「貢献」節 (CONTRIBUTING へのリンク 1 段落) を追加。新規 / 改修ファイルは `CONTRIBUTING.md` (新規) と `README.md` のみ、Python コード変更なし、`uv run ruff check src/` 緑。
 - **2026-05-10 (Step 7b 実装完了)** OpenAI image batch の自動リトライパスを実装。`batch-resubmit-missing --week W` CLI を新規追加 (`cli.py` `batch-submit-images` の上)、`batch-fetch-images` を retries 併用ポーリングに拡張、`daily-publish.yml` の `Publish today's episode` 直後に `continue-on-error: true` で best-effort step を挿入。**確定した設計判断**: (1) **manifest 構造は配列追記方式**: 既存 `state/batches/{week}.yaml` に `retries: [{batch_id, submitted_at, custom_ids, status, fetched_at, results}]` を append (オプション B のバージョン分割は採らず、1 ファイル完結で flatten 1 段)、(2) **prompt は再生成しない**: 初回の `jobs[].rendered_image_prompt` を reuse して `BatchImageJob` を作る (text LLM コスト追加なし、archive metadata 整合)、(3) **上限 2 回 (`_MAX_BATCH_RETRIES = 2`)**: 3 回目以降は warn + exit 0 で sync フォールバックに任せる、(4) **pending 判定は episode_number 基準** (date 列挙はしない): `state.history` × week filter で published 集合を作り、`_find_preflight_image` 不在の AND で pending を抽出。`publish-today` の挙動 (`state.last_published_episode + 1`) は ep_n と weekday n が一致しないため date マッピングは無意味と判断、(5) **main 未完了時のガード**: `manifest.status != "completed"` のときは exec せず `batch-fetch-images` が main を completed にした次回 cron まで待つ (二重投入防止)、(6) **`_drain_batch_results` ヘルパ抽出**: `batch-fetch-images` の result-saving loop を関数化、初回 batch と retry batch で同じ schema を manifest に書く。`_load_batch_job_meta` / `_find_preflight_image` は無改修 (top-level `jobs[]` から prompt メタが引け、preflight パスは固定。配列追記方式採用により「複数 manifest 対応」の必要が消えた)。**ローカル 5 ケース目視 OK**: (a) manifest 不在 → silent no-op、(b) main 未完了 → skip、(c) cap reached (2/2) → warn、(d) 全 published → "nothing to resubmit"、(e) ep5 preflight 存在 + ep1-4 published → "resubmitting 2 episode(s) (ep6, ep7) as retry #1 of 2" (実 API 投入は本番 / Step 7g に持越し)。`uv run ruff check src/` 緑。
 - **2026-05-10 (Step 7a 実装完了)** cron 生成物 (`scenarios/`, `state/`, `output/`, `docs/`) を main から完全分離し、orphan branch `gh-pages` に push する体制に切替。**実装手段は案 A: git worktree + ルート直下 symlink** を採用 (案 B working-directory 切替は `uv --project ..` 検証コストで却下、案 C `--data-root` flag は ROADMAP 完了条件 2 「Python 側に gh-pages の概念を漏らさない」原則違反で却下)。両 workflow に `Prepare gh-pages worktree` step を追加: `git fetch origin gh-pages` の有無で分岐し、無ければ `index.html` プレースホルダ 1 個で orphan commit + push (= フォークでの初回 dispatch で自動初期化、SETUP に手動 init 手順は書かない方針)。続く `Wire runtime symlinks` step で `scenarios -> .gh-pages/scenarios` 等を root 直下に張り、CLI は完全無改修で symlink 経由 `.gh-pages/` に書き込む。bot commit/push は `cd .gh-pages && git push origin gh-pages`、`pull --rebase --autostash` で weekly+daily の race を吸収 (`concurrency` group は Step 7g 観察で必要なら追加検討、今は入れない)。`fetch-depth: 0` を両 workflow に追加 (rebase に full clone が要る)。`.gitignore` は旧運用パターン 8 行削除 + `/.gh-pages/` と末尾なしの `/scenarios` `/state` `/output` `/docs` (symlink 捕捉) 追加。CLAUDE.md に「CI 上の出力 (gh-pages worktree)」節追加 + L74 末尾スラッシュ挙動の説明補強。**ローカル開発は symlink 不在のままで従来動作維持** (root 直下に書き込まれるが `.gitignore` が全部無視するため `git status` を汚さない)。**未確認**: private fork での workflow_dispatch 動作確認は Step 7g 検証手順 1-5 に統合 (本セッションでは git 環境がないため未実施)。

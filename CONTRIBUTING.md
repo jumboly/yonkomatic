@@ -38,14 +38,20 @@ uv run yonkomatic --help   # CLI 確認
 コミット前に必ず緑にしてください。
 
 ```bash
-uv run ruff check src/
+uv run ruff check src/ tests/
 ```
 
 ## 4. テスト
 
-ユニットテストは Step 7d で整備予定です。完了次第、本節に手順を追記します。
+ユニットテスト (Pydantic スキーマ / 状態ストア / プロンプト構築 / RSS 取得 / 静的サイト Publisher / バッチ manifest 読み出し) は `tests/` 配下にあります。
 
-それまでは以下を手動 integration テストとして利用してください:
+```bash
+uv run pytest
+```
+
+外部 API (OpenAI / Slack / RSS) はすべて `pytest-mock` で mock 化されているのでオフラインで完走します。
+
+実 API を叩く手動 integration テストは以下:
 
 ```bash
 uv run yonkomatic test slack       # Slack 疎通
@@ -75,7 +81,7 @@ uv run yonkomatic test panel       # シナリオ → text LLM → 画像生成
   - **何を**: 変更の概要
   - **なぜ**: 関連する Issue / Discussions リンク、または背景
   - **動作確認**: 手元で走らせたコマンドと結果 (`uv run yonkomatic test panel` のログなど)
-- lint (`uv run ruff check src/`) が緑であることが前提です
+- lint (`uv run ruff check src/ tests/`) と pytest (`uv run pytest`) が緑であることが前提です
 - レビュアーの指名は不要、Maintainer が拾います
 
 ## 8. Issue / Discussions

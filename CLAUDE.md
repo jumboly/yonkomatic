@@ -21,8 +21,9 @@ uv run yonkomatic test slack       # Slack 疎通 (.env に SLACK_BOT_TOKEN/CHAN
 uv run yonkomatic test image --prompt "<具体的な画像描写>"  # OpenAI 画像生成単体
 uv run yonkomatic test panel       # シナリオ → text LLM プロンプト → 画像生成
 
-# Lint
-uv run ruff check src/
+# Lint + tests
+uv run ruff check src/ tests/
+uv run pytest
 ```
 
 `output/`, `scenarios/`, `state/` は `.gitignore` 済み (利用者ブランチでのみ commit される)。テストの生成物は気にせず置いてよい。

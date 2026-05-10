@@ -28,13 +28,6 @@ dependencies = [
     "feedparser>=6.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "pytest-mock>=3.12",
-    "ruff>=0.4",
-]
-
 [project.scripts]
 yonkomatic = "yonkomatic.cli:app"
 
@@ -63,5 +56,10 @@ ignore = ["E501"]
 
 [dependency-groups]
 dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
     "ruff>=0.15.12",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
