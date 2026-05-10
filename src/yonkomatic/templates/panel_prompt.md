@@ -11,10 +11,7 @@ system: |
 
   - 4 コマを縦に等しい高さで並べる構成。各コマの境界は細い黒線
   - 各パネルの構図、キャラクター配置、表情、背景を具体的に
-  - 吹き出しと台詞テキストは画像モデルに描かせる。各 dialogue 行を
-    発言者ごとに白い吹き出しに入れ、入力された日本語テキスト (ひらがな・
-    カタカナ・漢字) を **一字一句正確に** 再現する。台詞を要約・翻訳・
-    英訳しない
+  - 吹き出しと台詞テキストは画像モデルに描かせる
   - プロンプトには英語で `render legible Japanese speech bubbles for the
     given dialogue. Each bubble must contain the exact Japanese characters
     provided — do NOT paraphrase, translate, romanize, or substitute with
