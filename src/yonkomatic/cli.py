@@ -374,13 +374,13 @@ def test_news(
 @test_app.command("panel")
 def test_panel(
     scenario_path: Path = typer.Option(
-        Path("examples/minimal/sample-scenario.yaml"),
+        Path("content/sample-scenario.yaml"),
         "--scenario",
         "-s",
         help="Path to a scenario YAML file (single episode).",
     ),
     content_dir: Path = typer.Option(
-        Path("examples/minimal"),
+        Path("content"),
         "--content",
         help="Directory holding prompt.md + images/.",
     ),
@@ -625,7 +625,7 @@ def publish(
         help="ISO date YYYY-MM-DD. Defaults to today in config schedule.timezone.",
     ),
     content_dir: Path = typer.Option(
-        Path("examples/minimal"),
+        Path("content"),
         "--content",
         help="Directory holding prompt.md + images/.",
     ),
@@ -827,7 +827,7 @@ def publish_today(
         help="ISO date YYYY-MM-DD. Defaults to today in config schedule.timezone.",
     ),
     content_dir: Path = typer.Option(
-        Path("examples/minimal"),
+        Path("content"),
         "--content",
         help="Directory holding prompt.md + images/.",
     ),
@@ -973,7 +973,7 @@ def batch_submit_images(
         help="Scenarios YAML. Defaults to scenarios/{week}.yaml.",
     ),
     content_dir: Path = typer.Option(
-        Path("examples/minimal"), "--content"
+        Path("content"), "--content"
     ),
     manifest_path: Path | None = typer.Option(
         None,
@@ -1214,7 +1214,7 @@ def generate_scenarios(
         help="Output YAML path. Defaults to scenarios/{week}.yaml.",
     ),
     content_dir: Path = typer.Option(
-        Path("examples/minimal"),
+        Path("content"),
         "--content",
         help="Directory holding prompt.md + images/.",
     ),

@@ -1,0 +1,12 @@
+# Why merge=ours for content/: fork users replace prompt.md and images/
+# with their own work. When pulling upstream template updates, the merge
+# strategy "ours" keeps the fork's local version of these files instead
+# of trying to merge upstream's sample assets back in. This requires the
+# fork to register the strategy locally:
+#
+#     git config --add merge.ours.driver true
+#
+# (or set globally once per machine). See SETUP.md for the full flow.
+content/prompt.md     merge=ours
+content/sample-scenario.yaml  merge=ours
+content/images/**     merge=ours

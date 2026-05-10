@@ -63,13 +63,13 @@ API キーやチャンネル ID 等の機密値は **設定オブジェクトに
 
 `images/` は再帰 glob で全画像を集める (サブディレクトリ・ファイル名自由、拡張子 `.png/.jpg/.jpeg/.webp`)。順序を制御したければ `01-...` のような numeric prefix を使う (sorted で安定順)。`max_images` を超えたら warn ログを出して先頭 N 枚に切り捨て。
 
-## 利用者ブランチ vs main の境界
+## upstream テンプレ vs fork 先の境界
 
-このリポジトリは **OSS テンプレート**。main には:
+このリポジトリは **OSS テンプレート専用** (cron は停止済み、`workflow_dispatch` のみ)。利用者は fork して fork 先で運用する。upstream main には:
 
-- ✅ フレームワークコード、`examples/minimal/` のサンプル一式 (テキスト + プロジェクト保有の AI 生成リファレンス画像)、ドキュメント、ワークフロー定義
-- ❌ 利用者個別のキャラ素材、API キー、`scenarios/` `output/` `state/` の実データ
-- `examples/minimal/images/` の画像はプロジェクトが OSS ライセンス下で配布する用に保有するものに限定する。利用者は自前の画像に差し替えて運用する想定 (利用者ブランチ側で `images/` を上書き)
+- ✅ フレームワークコード、`content/` の動作確認用サンプル素材一式 (テキスト + プロジェクト保有の AI 生成リファレンス画像)、ドキュメント、ワークフロー定義
+- ❌ API キー、`scenarios/` `output/` `state/` の実運用データ
+- `content/images/` の画像はプロジェクトが OSS ライセンス下で配布する用に保有するものに限定する。fork 先で利用者が自前の画像に差し替える想定 (`.gitattributes` の `content/* merge=ours` で upstream 更新時の衝突を回避)
 
 `.gitignore` の `/scenarios/`, `/output/`, `/state/`, `/tmp/` は **先頭 `/` 必須**。`state/` だけだと `src/yonkomatic/state/` まで巻き込んでしまう。
 

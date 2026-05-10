@@ -8,7 +8,7 @@ of content.
 
 These models are the contract between scenario generation (Step 4) and
 panel description / image generation (Step 2). Hand-written sample files
-in ``examples/minimal/`` must validate against this schema.
+in ``content/sample-scenario.yaml`` must validate against this schema.
 """
 
 from __future__ import annotations
