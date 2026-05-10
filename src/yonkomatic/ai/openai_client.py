@@ -225,10 +225,10 @@ class OpenAIClient:
         api_key: str,
         text_model: str,
         image_model: str,
+        image_format: _ImageFormat,
+        image_compression: int,
         timeout: float = 600.0,
         usage_tracker: UsageTracker | None = None,
-        image_format: _ImageFormat = "png",
-        image_compression: int = 90,
     ) -> None:
         # Why 600s default: gpt-image-2 with reasoning at 1536x2048 routinely
         # exceeds 120s. Smaller images / older models still finish well under
@@ -352,9 +352,12 @@ class OpenAIClient:
     ) -> ImageResult:
         """Generate one image. With refs: ``images.edit``; without: ``images.generate``.
 
-        Both endpoints return ``b64_json`` decoded to PNG bytes. Retries on
-        RateLimitError and 5xx APIError, honoring the server's ``Retry-After``
-        header when present (otherwise exponential backoff).
+        Both endpoints return ``b64_json`` whose bytes encode the format
+        configured at construction (``image_format`` — png / jpeg / webp);
+        the corresponding MIME is exposed via ``ImageResult.mime_type`` and
+        ``self.image_mime_type``. Retries on RateLimitError and 5xx APIError,
+        honoring the server's ``Retry-After`` header when present (otherwise
+        exponential backoff).
         """
         last_error: Exception | None = None
         for attempt in range(max_attempts):

@@ -146,7 +146,19 @@ def _apply_cli_overrides(
     return cfg.model_copy(update=updates) if updates else cfg
 
 
-_MIME_EXT_OVERRIDE = {"image/jpeg": ".jpg"}
+# Pinned mappings for the formats `AIConfig.image_format` allows. We avoid
+# `mimetypes.guess_extension` / `mimetypes.guess_type` here because their
+# output is platform-dependent: some Linux Pythons return `.jpe` for
+# `image/jpeg`, and `image/webp` is missing from older mime.types. Keeping
+# both directions explicit guarantees identical output paths and MIME
+# strings across CI, GitHub Actions, and local macOS runs.
+_MIME_EXT_OVERRIDE = {"image/jpeg": ".jpg", "image/webp": ".webp"}
+_EXT_MIME_OVERRIDE = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
 
 
 def _save_image(output: Path, image_bytes: bytes, mime_type: str) -> Path:
@@ -155,12 +167,6 @@ def _save_image(output: Path, image_bytes: bytes, mime_type: str) -> Path:
     Why: image APIs do not always honor a requested output format and may
     return JPEG when callers asked for ``.png`` — aligning extension with
     content avoids downstream tools (Slack, browsers) misreading the file.
-
-    Why the override: ``mimetypes.guess_extension('image/jpeg')`` returns
-    different values across platforms (``.jpe`` on some Linux Pythons,
-    ``.jpg`` on macOS) depending on the order in which the type table was
-    registered. We pin to ``.jpg`` so output paths are identical in CI and
-    local runs.
     """
     actual_ext = (
         _MIME_EXT_OVERRIDE.get(mime_type)
@@ -172,6 +178,20 @@ def _save_image(output: Path, image_bytes: bytes, mime_type: str) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(image_bytes)
     return output
+
+
+def _guess_image_mime(path: Path) -> str:
+    """Return the MIME type for an image filename, platform-stable.
+
+    Prefers the pinned ``_EXT_MIME_OVERRIDE`` so a preflight written as
+    ``.webp`` still maps to ``image/webp`` even on systems whose mime.types
+    omits the entry.
+    """
+    return (
+        _EXT_MIME_OVERRIDE.get(path.suffix.lower())
+        or mimetypes.guess_type(path.name)[0]
+        or "application/octet-stream"
+    )
 
 
 def _generate_test_image(output_path: Path) -> None:
@@ -723,16 +743,9 @@ def _publish_episode_pipeline(
 
     if preflight_path is not None:
         console.print(f"  using preflight image: [dim]{preflight_path}[/dim]")
-        # Why guess from the filename rather than hardcoding image/png:
-        # batch-fetch-images writes preflights with whatever extension matches
-        # ai.image_format (jpeg / webp / png), and downstream consumers
-        # (Slack upload, archive YAML metadata) need the true MIME.
-        preflight_mime = (
-            mimetypes.guess_type(preflight_path.name)[0] or "application/octet-stream"
-        )
         image_result = ImageResult(
             image_bytes=preflight_path.read_bytes(),
-            mime_type=preflight_mime,
+            mime_type=_guess_image_mime(preflight_path),
         )
 
         # Carry the prompts that produced this image into the archive so
