@@ -420,6 +420,7 @@ def test_panel(
             pack=pack,
             openai=openai,
             template_path=panel_template,
+            image_model=cfg.ai.image_model,
         )
 
     if save_rendered:
@@ -717,6 +718,7 @@ def _publish_episode_pipeline(
                 pack=pack,
                 openai=openai,
                 template_path=panel_template,
+                image_model=cfg.ai.image_model,
             )
 
         merged_refs = _merge_refs(pack, refs)
@@ -1008,6 +1010,7 @@ def batch_submit_images(
                 pack=pack,
                 openai=openai,
                 template_path=panel_template,
+                image_model=cfg.ai.image_model,
             )
         jobs.append(BatchImageJob(custom_id=cid, prompt=image_prompt))
         job_meta.append(

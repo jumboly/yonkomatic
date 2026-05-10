@@ -123,7 +123,10 @@ def generate_week(
         "image_model_guidance": _image_model_guidance(image_model),
     }
     user = render(template.body, variables)
-    system = template.system
+    # Why render(system) too: the system frontmatter now includes
+    # {{image_model_guidance}}; load_template returns raw strings, so
+    # without this call the placeholder would ship to OpenAI verbatim.
+    system = render(template.system, variables)
 
     rendered = RenderedPrompt(system=system, user=user)
     scenario = openai.complete_structured(
