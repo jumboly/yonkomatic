@@ -8,11 +8,11 @@
 
 ## 現在地
 
-- **完了**: Step 1〜4, **Step 5 全部** (5a/5b/5c/5d + simplify), **Step 5e** (実装 + A/B 検証、本番採用見送り), **Step 6** (テンプレ化 + OpenAI 切替 + 構造刷新), **Step 6.5** (gpt-image-2 → 960x1280 本番採用、**W21 全 7 話で 7/7 完全一致を確証**), **Step 6.6** (Actions の batch 化 — 実装は Step 6.5 と一体で完了済み), **Step 7a** (生成物の gh-pages 分離 — workflow を gh-pages worktree + symlink 経由に切替、main からランタイムを完全分離), **Step 7b** (`batch-resubmit-missing` CLI + manifest `retries[]` + daily-publish への best-effort step 配線、上限 2 回・prompt reuse、ローカル 5 ケース目視 OK), **Step 7c** (CONTRIBUTING.md 新規作成 — fork 運用前提 + 開発ルール明文化、README から「貢献」節経由でリンク), **Step 7d** (pytest 6 ファイル / 44 ケース新設 — schema / state / panel / news / static_site / batch manifest をオフラインモック化、`.github/workflows/ci.yml` で PR + main push に lint+test、`[dependency-groups].dev` に統一)、batch CLI、モデル別ガイダンス機構 (scenario / panel-prompt 両 LLM)、参考画像 LLM 告知配線
-- **次**: **Step 7e** (README リライト + デモ画像) または **Step 7f** (SETUP.md 全面改訂) を選んで着手 — Step 7 全体は 7a〜7h に分割済み (下記セクション参照)
+- **完了**: Step 1〜4, **Step 5 全部** (5a/5b/5c/5d + simplify), **Step 5e** (実装 + A/B 検証、本番採用見送り), **Step 6** (テンプレ化 + OpenAI 切替 + 構造刷新), **Step 6.5** (gpt-image-2 → 960x1280 本番採用、**W21 全 7 話で 7/7 完全一致を確証**), **Step 6.6** (Actions の batch 化 — 実装は Step 6.5 と一体で完了済み), **Step 7a** (生成物の gh-pages 分離 — workflow を gh-pages worktree + symlink 経由に切替、main からランタイムを完全分離), **Step 7b** (`batch-resubmit-missing` CLI + manifest `retries[]` + daily-publish への best-effort step 配線、上限 2 回・prompt reuse、ローカル 5 ケース目視 OK), **Step 7c** (CONTRIBUTING.md 新規作成 — fork 運用前提 + 開発ルール明文化、README から「貢献」節経由でリンク), **Step 7d** (pytest 6 ファイル / 44 ケース新設 — schema / state / panel / news / static_site / batch manifest をオフラインモック化、`.github/workflows/ci.yml` で PR + main push に lint+test、`[dependency-groups].dev` に統一), **Step 7e** (README 全面リライト — 6 節構成 = Status/Demo/Quick Start/How it works/位置付け/リンク集、W21 ep4+ep5 を `assets/demo/` に並べて本番品質サンプル提示、章立て表で gpt-5.4 / gpt-image-2 / Publisher Protocol を要約)、batch CLI、モデル別ガイダンス機構 (scenario / panel-prompt 両 LLM)、参考画像 LLM 告知配線
+- **次**: **Step 7f** (SETUP.md 全面改訂 — `.gitignore` 緩和削除 + gh-pages deploy 設定 + batch リトライ運用) に着手 — Step 7 全体は 7a〜7h に分割済み (下記セクション参照)
 - **ブロッカー**: Step 7a/7b の private fork 動作確認 (Step 7g 検証手順) は実環境がないと実施不可、コミット後に手動 dispatch で確認
 
-最終更新: 2026-05-10 (Step 7d 実装完了 — pytest + pytest-mock を `[dependency-groups].dev` に集約、6 ファイル 44 ケースが offline で完走、`tests/` フラット構成、`.github/workflows/ci.yml` を PR + main push トリガーで新設)
+最終更新: 2026-05-10 (Step 7e 実装完了 — README を 6 節構成にリライト、`assets/demo/` に W21 ep4 「静かな通知音」+ ep5 「傘の待機列」の 2 枚を本番品質サンプルとして配置、Demo URL は fork 後 `https://<your>.github.io/yonkomatic/` 例として注記)
 
 ### Step 6.5 余波の検証ログ (2026-05-10 W21 batch で 3 件すべて確証済み)
 
@@ -498,21 +498,21 @@ yonkomatic batch-fetch-images --week 2026-W21
 1. coverage 計測 → **未導入** (緑/赤判定で十分、CI を肥大化させない)
 2. integration テスト (実 API) → **未導入** (`uv run yonkomatic test panel/slack/news` が既存の手動 integration)
 
-#### ⏳ Step 7e — README リライト + Quick Start + デモ画像 (0.5 セッション)
+#### ✅ Step 7e — README リライト + Quick Start + デモ画像 (2026-05-10)
 
-**スコープ**: README に Quick Start (5 分動作) + 自分の素材で稼働させた本番サンプル画像 1 枚 + デモ用 GitHub Pages の URL。
+**結果**: README を 6 節構成に全面書き換え。W21 ep4/ep5 の本番品質サンプル 2 枚を `assets/demo/` に配置。
 
-**完了条件**:
-- 章立て: Quick Start / Demo / How it works (1 分) / リンク集
-- 本番サンプル画像 1 枚を `assets/demo/` に配置 (W21 ep4 or ep5 推奨)
-- README からの SETUP / CONTRIBUTING / ROADMAP / SPEC / LICENSE リンク
-- Status 行は 7g 完了後に「Step 7 完了」に書き換え (暫定で残す)
+**確定事項**:
+- **章立て** = Status / Demo / Quick Start / How it works / このリポジトリの位置付け / リンク集 / ライセンス の 6 節 (ROADMAP 指示の 4 節 + 「位置付け (upstream vs fork 図解)」を残す方針で確定)
+- **デモ画像** = W21 ep4 「静かな通知音」(キッチンタイマーの SFX「ピッ」) と ep5 「傘の待機列」(雨と保険オチ) の **2 枚並べ** (ROADMAP 推奨は 1 枚だったが、屋内 SFX × 屋外オチで雰囲気差を出すため 2 枚採用)。`output/preflight/2026-W21/ep{4,5}.png` から `assets/demo/2026-w21-ep{4,5}-{quiet-notification,umbrella-queue}.png` にコピー
+- **Demo URL** = `https://<your-name>.github.io/yonkomatic/` の形で fork 後に有効化される URL 例として注記 (上流テンプレは cron 停止のため deploy されない旨を明記)
+- **モデル名表記** = `config.yaml` 現行値 (gpt-5.4 / gpt-image-2) と整合確認済、How it works 節の表に統合
+- **捨てた節** = 旧「content/ の構造」(SETUP.md と CLAUDE.md に詳述あり、How it works 内の小ブロックに統合して 1 ディレクトリの形だけ残す)
+- **Status 行** = 「Step 7 着手中、7a〜7d 完了、本 README は 7e の成果物」表記。7g 完了後に「Step 7 完了」へ書き換える (Step 7g §完了条件に明記)
 
-**影響ファイル**: `README.md`, `assets/demo/*.png` (新規)
+**影響ファイル**: `README.md` (全面書き換え、77 → 102 行), `assets/demo/2026-w21-ep4-quiet-notification.png` (新規 1.9MB), `assets/demo/2026-w21-ep5-umbrella-queue.png` (新規 2.0MB)
 
-**未決事項**:
-1. デモ画像の話 → **推奨: W21 ep5 (傘の待機列) or ep4 (静かな通知音)** (SFX + dialogue 両立)
-2. Demo URL → **推奨: `https://jumboly.github.io/yonkomatic/`** (上流テンプレでは動かないが fork 後の同等 URL 例として併記)
+Python コード / config / workflow への変更なし、`uv run ruff check src/ tests/` 緑。
 
 #### ⏳ Step 7f — SETUP.md 全面改訂 (0.5〜1 セッション)
 
@@ -566,6 +566,7 @@ yonkomatic batch-fetch-images --week 2026-W21
 
 新しい決定が出たら頭に追加。古いものは削除せず残す。
 
+- **2026-05-10 (Step 7e 実装完了)** README を全面リライトし、本番品質サンプル 2 枚を `assets/demo/` に配置。**確定した方針**: (1) **章立ては 6 節構成** = Status (1 行) / Demo (画像 2 枚 + Demo URL 注記) / Quick Start (5 ステップ) / How it works (パイプライン図 + 技術スタック表 + content 構造) / このリポジトリの位置付け (upstream vs fork 図解、現行維持) / リンク集 / ライセンス。ROADMAP §7e 指示の「Quick Start / Demo / How it works / リンク集」4 節に「位置付け」節を残す形で着地、(2) **デモ画像は W21 ep4 + ep5 を 2 枚並べ** — ROADMAP 推奨の「ep4 or ep5」を両方採用 (屋内 SFX「ピッ」× 屋外オチ「ぽつ」で雰囲気差)。`output/preflight/2026-W21/` から `assets/demo/2026-w21-ep{4,5}-{quiet-notification,umbrella-queue}.png` にコピー、Markdown table 2 列で並べてキャプションは「summary_no_spoiler」原文流用、(3) **Demo URL は fork 後 URL 例で注記** — `https://<your-name>.github.io/yonkomatic/` の形で示し、上流テンプレは cron 停止のため deploy されない旨を明記。`jumboly.github.io/yonkomatic/` を直書きせず汎用例にしたのは fork 利用者が自分の URL に置き換えやすくするため、(4) **モデル名は config.yaml と整合確認** — text=`gpt-5.4` / image=`gpt-image-2`、現 config.yaml と一致を grep で確認してから記載、(5) **「content/ の構造」節は廃止** — How it works 内の小ブロック (`prompt.md` + `images/` だけ) に圧縮、詳細は SETUP.md/CLAUDE.md に委譲、(6) **Status 行は暫定表記** — 「Step 7 着手中、7a/7b/7c/7d 完了、本 README は 7e の成果物」。7g 完了後に「Step 7 完了」へ書き換える運用を §7g 完了条件に既に明記済み、(7) **How it works に技術スタック表を統合** — 旧「アーキテクチャ概要」節を廃止し、パイプライン ASCII 図の直下に表を置く形で重複を排除、`Publisher Protocol で抽象化、Discord は将来対応` も保持、(8) **Discord 将来対応の文言は維持** — Step 7 のスコープ外だが、Publisher Protocol 設計の意図を示すため残す。**新規ファイル**: `assets/demo/2026-w21-ep4-quiet-notification.png` (1.9MB) / `assets/demo/2026-w21-ep5-umbrella-queue.png` (2.0MB)。**修正**: `README.md` (77 → 102 行、6 節再構成)。`uv run ruff check src/ tests/` 緑。Python コード / config / workflow 変更なし。
 - **2026-05-10 (Step 7d 実装完了)** `tests/` をフラット構成で新設、6 ファイル 44 ケースの pytest を追加。**確定した方針**: (1) **dev deps は `[dependency-groups].dev` に統一** — `[project.optional-dependencies]` セクションを削除し pytest/pytest-mock/ruff を移動 (uv 流儀の単一ソース、PEP 735 準拠)、(2) **`tests/` フラット構成** — モジュール構造に揃えたサブディレクトリは作らず `tests/test_*.py` 直下で見通し確保、(3) **`conftest.py` 作らない** — 共通 fixture は各ファイル内のローカルヘルパで十分、結合を避ける、(4) **OpenAI mock は `MagicMock(spec=OpenAIClient)`** — `mocker.patch("...complete")` よりテスト主体が明確、spec で API ドリフト検知、(5) **feedparser patch 先は `yonkomatic.news.fetcher.feedparser.parse`** (import 元側) — ネットワーク漏れ防止のためテスト全本で統一、(6) **`_load_batch_job_meta` テストは `monkeypatch.chdir(tmp_path)` 必須** — 関数が CWD 相対 (`Path("state/batches/...")`) のためリポジトリ実 state を読む事故を回避、(7) **CI は PR + main push 両トリガー** — fork 利用者の PR でも作者の merge 後でも回る、(8) **`uv sync` は `--frozen` なし** — 本コミットで `uv.lock` も再生成、daily-publish 側の frozen 整合は次以降の責務外、(9) **`[tool.pytest.ini_options]` に `testpaths = ["tests"]` のみ** — `addopts` / `asyncio_mode` / `filterwarnings` は最小起動で。**新規ファイル**: `tests/test_scenario_schema.py` (7) / `test_state_repo.py` (7) / `test_panel_description.py` (8) / `test_news_fetcher.py` (8) / `test_publisher_static_site.py` (8) / `test_batch_manifest.py` (6) / `.github/workflows/ci.yml`。**修正**: `pyproject.toml` (groups 統一 + pytest config) / `uv.lock` (再生成) / `CONTRIBUTING.md` §3-4,7 (lint コマンド + テスト節 + PR 流儀) / `CLAUDE.md` (lint+test コマンド例)。`uv run pytest` 0.46s で 44 passed、`uv run ruff check src/ tests/` 緑。**Step 7b retries 同居テスト 1 ケース追加** — `_load_batch_job_meta` が retries[].results 配下の custom_id を誤返却しない契約を固定。
 - **2026-05-10 (Step 7c 実装完了)** `CONTRIBUTING.md` を新規作成し、上流テンプレへの貢献ガイドを明文化。**確定した方針**: (1) **9 章構成** = 位置付けと貢献の範囲 / 開発環境 (uv) / Lint (`uv run ruff check src/`) / テスト (Step 7d 完了後追記の placeholder + 既存 `test slack/panel` を手動 integration として案内) / コーディング規約 (CLAUDE.md からの噛み砕き — WHY のみコメント / Step 番号は code に書かない / `typer.Exit` / `_fail_on` / `PublishResult(ok=False)`) / コミットメッセージ規約 (Conventional Commits 風 + **Co-Authored-By 禁止** を再掲、出典 §2026-05-08) / PR 流儀 (説明テンプレ「何を / なぜ / 動作確認」、lint 緑前提、レビュアー指名不要) / Issue & Discussions (バグのみ Issue、要望・質問は Discussions) / ライセンスと行動規範 (MIT + Contributor Covenant 相当を inline)、(2) **Issue / PR テンプレートは置かない** (テンプレ専用リポゆえ流入を絞る)、(3) **Code of Conduct は inline** (別ファイル化しない)、(4) **PR 流儀は contributor 向け基本ルールのみ** (ROADMAP/SPEC 更新義務は課さない、メンテナ向け規約は CLAUDE.md 既載)、(5) **Issue は再現性あるバグのみ受付**。`README.md` の「ライセンス」直前に「貢献」節 (CONTRIBUTING へのリンク 1 段落) を追加。新規 / 改修ファイルは `CONTRIBUTING.md` (新規) と `README.md` のみ、Python コード変更なし、`uv run ruff check src/` 緑。
 - **2026-05-10 (Step 7b 実装完了)** OpenAI image batch の自動リトライパスを実装。`batch-resubmit-missing --week W` CLI を新規追加 (`cli.py` `batch-submit-images` の上)、`batch-fetch-images` を retries 併用ポーリングに拡張、`daily-publish.yml` の `Publish today's episode` 直後に `continue-on-error: true` で best-effort step を挿入。**確定した設計判断**: (1) **manifest 構造は配列追記方式**: 既存 `state/batches/{week}.yaml` に `retries: [{batch_id, submitted_at, custom_ids, status, fetched_at, results}]` を append (オプション B のバージョン分割は採らず、1 ファイル完結で flatten 1 段)、(2) **prompt は再生成しない**: 初回の `jobs[].rendered_image_prompt` を reuse して `BatchImageJob` を作る (text LLM コスト追加なし、archive metadata 整合)、(3) **上限 2 回 (`_MAX_BATCH_RETRIES = 2`)**: 3 回目以降は warn + exit 0 で sync フォールバックに任せる、(4) **pending 判定は episode_number 基準** (date 列挙はしない): `state.history` × week filter で published 集合を作り、`_find_preflight_image` 不在の AND で pending を抽出。`publish-today` の挙動 (`state.last_published_episode + 1`) は ep_n と weekday n が一致しないため date マッピングは無意味と判断、(5) **main 未完了時のガード**: `manifest.status != "completed"` のときは exec せず `batch-fetch-images` が main を completed にした次回 cron まで待つ (二重投入防止)、(6) **`_drain_batch_results` ヘルパ抽出**: `batch-fetch-images` の result-saving loop を関数化、初回 batch と retry batch で同じ schema を manifest に書く。`_load_batch_job_meta` / `_find_preflight_image` は無改修 (top-level `jobs[]` から prompt メタが引け、preflight パスは固定。配列追記方式採用により「複数 manifest 対応」の必要が消えた)。**ローカル 5 ケース目視 OK**: (a) manifest 不在 → silent no-op、(b) main 未完了 → skip、(c) cap reached (2/2) → warn、(d) 全 published → "nothing to resubmit"、(e) ep5 preflight 存在 + ep1-4 published → "resubmitting 2 episode(s) (ep6, ep7) as retry #1 of 2" (実 API 投入は本番 / Step 7g に持越し)。`uv run ruff check src/` 緑。
