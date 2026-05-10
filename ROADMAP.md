@@ -12,7 +12,7 @@
 - **次**: **Step 7g 観察期間** — 当初の private fork 検証を **public demo repo `jumboly/yonkomatic-demo`** (公開ライブデモ) に格上げ。demo repo は立ち上げ済み (workflow schedule アンコメント + secrets 設定済み)、初回 `workflow_dispatch` + Pages 有効化を経て 1 週間放置 → preflight 利用率 / batch 完走率を集計
 - **ブロッカー**: 初回 dispatch + Pages 有効化が直近の作業項目 (Phase D)。観察中に修正必要になった場合は致命的でなければ継続、致命的なら仕切り直し
 
-最終更新: 2026-05-10 (Step 7g 着手 — `jumboly/yonkomatic-demo` を public で立ち上げ、workflow schedule アンコメント済み、secrets `OPENAI_API_KEY` / `SLACK_BOT_TOKEN` / `SLACK_CHANNEL_ID` 設定、workflow permissions を `Read and write` に。upstream README に demo URL を追記、初回 `workflow_dispatch` + Pages 有効化が次)
+最終更新: 2026-05-10 (Step 7g 観察前の容量最適化 — **画像出力を JPEG q=90 に切替**。`AIConfig.image_format` / `image_compression` を新設、`OpenAIClient` から `images.generate` / `images.edit` / batch JSONL に `output_format` + `output_compression` を伝播。`assets/demo/` の本番 4 コマ 2 枚 (960×1280) 実測で **PNG → JPEG q=90 で平均 -83%** (2.0 MB → 334 KB)、`test panel` 実 API で 270 KB / 視認劣化なしを確認。年次推定で 1 日 1 話 × 365 日 → **730 MB → 120 MB / 年** の削減。`_find_preflight_image` を ext 非依存 glob に、`_save_image` の `image/jpeg` → `.jpg` を platform 横断で固定。既存 44 pytest + ruff 緑。次は Step 7g `jumboly/yonkomatic-demo` 観察開始 — 初回 `workflow_dispatch` + Pages 有効化が直近の作業)
 
 ### Step 6.5 余波の懸案 — W21 batch で全件確証 (2026-05-10)
 

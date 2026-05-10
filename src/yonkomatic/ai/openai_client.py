@@ -59,6 +59,31 @@ _BatchStatusLiteral = Literal[
     "expired",
 ]
 _CallKind = Literal["text", "image"]
+_ImageFormat = Literal["png", "jpeg", "webp"]
+
+# Map output_format → MIME type. Pillow / Slack / browsers all key off MIME so
+# downstream code (e.g. `_save_image` in cli.py) chooses the right extension
+# from this rather than guessing from the bytes.
+_FORMAT_MIME: dict[_ImageFormat, str] = {
+    "png": "image/png",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+}
+
+
+def _image_request_extras(
+    image_format: _ImageFormat, compression: int
+) -> dict[str, Any]:
+    """Format/compression kwargs accepted by ``/v1/images/*``.
+
+    PNG is lossless and the API rejects ``output_compression`` for it, so we
+    only attach the field when it would actually take effect. Used by both
+    sync and batch paths so they stay in lockstep.
+    """
+    extras: dict[str, Any] = {"output_format": image_format}
+    if image_format != "png":
+        extras["output_compression"] = compression
+    return extras
 
 
 # Per 1M-token rates for known models, standard tier (USD).
@@ -200,6 +225,8 @@ class OpenAIClient:
         api_key: str,
         text_model: str,
         image_model: str,
+        image_format: _ImageFormat,
+        image_compression: int,
         timeout: float = 600.0,
         usage_tracker: UsageTracker | None = None,
     ) -> None:
@@ -210,6 +237,12 @@ class OpenAIClient:
         self.text_model = text_model
         self.image_model = image_model
         self.usage_tracker = usage_tracker
+        self.image_format: _ImageFormat = image_format
+        self.image_compression = image_compression
+
+    @property
+    def image_mime_type(self) -> str:
+        return _FORMAT_MIME[self.image_format]
 
     def _record_text(self, response: Any) -> None:
         usage = getattr(response, "usage", None)
@@ -319,9 +352,12 @@ class OpenAIClient:
     ) -> ImageResult:
         """Generate one image. With refs: ``images.edit``; without: ``images.generate``.
 
-        Both endpoints return ``b64_json`` decoded to PNG bytes. Retries on
-        RateLimitError and 5xx APIError, honoring the server's ``Retry-After``
-        header when present (otherwise exponential backoff).
+        Both endpoints return ``b64_json`` whose bytes encode the format
+        configured at construction (``image_format`` — png / jpeg / webp);
+        the corresponding MIME is exposed via ``ImageResult.mime_type`` and
+        ``self.image_mime_type``. Retries on RateLimitError and 5xx APIError,
+        honoring the server's ``Retry-After`` header when present (otherwise
+        exponential backoff).
         """
         last_error: Exception | None = None
         for attempt in range(max_attempts):
@@ -331,7 +367,10 @@ class OpenAIClient:
                 if not image_b64:
                     raise RuntimeError("OpenAI returned empty image data")
                 self._record_image(response)
-                return ImageResult(image_bytes=base64.b64decode(image_b64))
+                return ImageResult(
+                    image_bytes=base64.b64decode(image_b64),
+                    mime_type=self.image_mime_type,
+                )
             except (RateLimitError, APIError) as e:
                 last_error = e
                 code = getattr(e, "status_code", None) or 0
@@ -356,11 +395,13 @@ class OpenAIClient:
         handles if a later open() raises. ExitStack guarantees every opened
         file is closed even on partial failure.
         """
+        extras = _image_request_extras(self.image_format, self.image_compression)
         if not reference_images:
             return self.client.images.generate(
                 model=self.image_model,
                 prompt=prompt,
                 size=size,
+                **extras,
             )
         with ExitStack() as stack:
             files = [stack.enter_context(open(p, "rb")) for p in reference_images]
@@ -369,6 +410,7 @@ class OpenAIClient:
                 image=files if len(files) > 1 else files[0],
                 prompt=prompt,
                 size=size,
+                **extras,
             )
 
     def submit_image_batch(self, *, jobs: list[BatchImageJob], size: str) -> str:
@@ -379,7 +421,13 @@ class OpenAIClient:
         reference image bytes) needs multipart and is therefore unsupported
         by batch — yonkomatic's batch path skips reference images entirely.
         """
-        jsonl = _image_batch_jsonl(jobs, model=self.image_model, size=size)
+        jsonl = _image_batch_jsonl(
+            jobs,
+            model=self.image_model,
+            size=size,
+            output_format=self.image_format,
+            output_compression=self.image_compression,
+        )
         upload = self.client.files.create(
             file=("batch.jsonl", io.BytesIO(jsonl.encode("utf-8"))),
             purpose="batch",
@@ -465,7 +513,9 @@ class OpenAIClient:
                 BatchImageResult(
                     custom_id=custom_id,
                     image_bytes=base64.b64decode(image_b64),
-                    mime_type="image/png",
+                    # The submitted batch pinned this format, so we report
+                    # it back unconditionally rather than parsing magic bytes.
+                    mime_type=self.image_mime_type,
                     error=None,
                     usage=usage,
                 )
@@ -502,15 +552,23 @@ class BatchStatus:
     results: list[BatchImageResult]  # populated only when status == "completed"
 
 
-def _image_batch_jsonl(jobs: list[BatchImageJob], *, model: str, size: str) -> str:
+def _image_batch_jsonl(
+    jobs: list[BatchImageJob],
+    *,
+    model: str,
+    size: str,
+    output_format: _ImageFormat,
+    output_compression: int,
+) -> str:
     """Render the JSONL payload for ``/v1/batches`` image generation."""
+    extras = _image_request_extras(output_format, output_compression)
     lines: list[str] = []
     for j in jobs:
         record = {
             "custom_id": j.custom_id,
             "method": "POST",
             "url": "/v1/images/generations",
-            "body": {"model": model, "prompt": j.prompt, "size": size},
+            "body": {"model": model, "prompt": j.prompt, "size": size, **extras},
         }
         lines.append(json.dumps(record, ensure_ascii=False))
     return "\n".join(lines) + "\n"
