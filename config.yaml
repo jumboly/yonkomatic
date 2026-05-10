@@ -14,8 +14,10 @@ ai:
   # OpenAI Image Generation モデル。
   image_model: "gpt-image-2"
   # gpt-image-2 はカスタムサイズ可 (各辺 16 の倍数 / 最大 3840px / 比率 3:1 以下)。
-  # 1536x2048 = 真の 3:4 (4 コマ縦並びのネイティブ比)。
-  image_size: "1536x2048"
+  # 960x1280 = 真の 3:4 (4 コマ縦並びのネイティブ比)。Slack/static_site の
+  # 表示サイズで dialogue + SFX が読み取れる必要十分な解像度。
+  # 印刷品質を狙うなら 1536x2048 (sync $0.27/枚, batch $0.137/枚) に切替。
+  image_size: "960x1280"
   max_image_retries: 3
   openai_api_key_env: OPENAI_API_KEY
 
