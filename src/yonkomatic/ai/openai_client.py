@@ -4,12 +4,20 @@ image generation (gpt-image-1 / gpt-image-2).
 Centralises model id pinning, retry policy, and the choice between
 ``images.generate`` (text-only) and ``images.edit`` (with reference images).
 Also tracks per-call token usage and estimated cost via ``UsageTracker``.
+
+Batch helpers (``submit_image_batch`` / ``fetch_image_batch``) wrap the
+``/v1/batches`` flow for ``/v1/images/generations``: 50% off list price,
+24h completion window. Reference images (``images.edit``) are not used
+in batch mode because the multipart request body is incompatible with
+the JSON-only batch input format.
 """
 
 from __future__ import annotations
 
 import base64
+import json
 import sys
+import tempfile
 import time
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -100,7 +108,9 @@ class UsageTracker:
         }
 
 
-def _compute_cost(model: str, kind: str, usage: dict[str, int]) -> float | None:
+def _compute_cost(
+    model: str, kind: str, usage: dict[str, int], *, batch: bool = False
+) -> float | None:
     rates = _PRICES.get(model)
     if rates is None:
         return None
@@ -120,7 +130,10 @@ def _compute_cost(model: str, kind: str, usage: dict[str, int]) -> float | None:
         cost += billable_image * rates.get("image_input", 0.0) / 1_000_000
         cost += cached * rates.get("image_cached_input", 0.0) / 1_000_000
         cost += usage.get("output_tokens", 0) * rates.get("image_output", 0.0) / 1_000_000
-    return cost
+    # Why halve at the end: OpenAI's batch API charges 50% across all rate
+    # categories uniformly, so applying a single multiplier on the total is
+    # equivalent and keeps per-rate logic readable.
+    return cost * 0.5 if batch else cost
 
 
 def _emit_call_log(record: CallRecord) -> None:
@@ -143,9 +156,12 @@ class OpenAIClient:
         api_key: str,
         text_model: str,
         image_model: str,
-        timeout: float = 120.0,
+        timeout: float = 600.0,
         usage_tracker: UsageTracker | None = None,
     ) -> None:
+        # Why 600s default: gpt-image-2 with reasoning at 1536x2048 routinely
+        # exceeds 120s. Smaller images / older models still finish well under
+        # the cap, so a generous timeout is safer than paying for a re-issue.
         self.client = OpenAI(api_key=api_key, timeout=timeout)
         self.text_model = text_model
         self.image_model = image_model
@@ -168,6 +184,21 @@ class OpenAIClient:
         _emit_call_log(record)
         if self.usage_tracker is not None:
             self.usage_tracker.add(record)
+
+    def record_batch_image_result(self, result: BatchImageResult) -> CallRecord | None:
+        """Convert a fetched batch image result into a CallRecord (batch pricing).
+
+        Returns the record so callers can persist or display it; also writes
+        to the attached UsageTracker. Skips entries with no usage data.
+        """
+        if result.usage is None:
+            return None
+        cost = _compute_cost(self.image_model, "image", result.usage, batch=True)
+        record = CallRecord(self.image_model, "image", dict(result.usage), cost)
+        _emit_call_log(record)
+        if self.usage_tracker is not None:
+            self.usage_tracker.add(record)
+        return record
 
     def _record_image(self, response: Any) -> None:
         usage = getattr(response, "usage", None)
@@ -295,6 +326,156 @@ class OpenAIClient:
                 prompt=prompt,
                 size=size,
             )
+
+    def submit_image_batch(self, *, jobs: list[BatchImageJob], size: str) -> str:
+        """Upload a JSONL of image-generation requests and create a batch.
+
+        Why this shape: ``/v1/images/generations`` accepts JSON-only bodies,
+        which is what the Batch API requires. ``/v1/images/edits`` (with
+        reference image bytes) needs multipart and is therefore unsupported
+        by batch — yonkomatic's batch path skips reference images entirely.
+        """
+        jsonl = _image_batch_jsonl(jobs, model=self.image_model, size=size)
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".jsonl", encoding="utf-8", delete=False
+        ) as fp:
+            fp.write(jsonl)
+            jsonl_path = Path(fp.name)
+        try:
+            with jsonl_path.open("rb") as f:
+                upload = self.client.files.create(file=f, purpose="batch")
+            batch = self.client.batches.create(
+                input_file_id=upload.id,
+                endpoint="/v1/images/generations",
+                completion_window="24h",
+            )
+            return batch.id
+        finally:
+            jsonl_path.unlink(missing_ok=True)
+
+    def fetch_image_batch(self, batch_id: str) -> BatchStatus:
+        """Look up a batch and download decoded images when it has completed.
+
+        For non-terminal statuses (in_progress / validating / finalizing) the
+        ``results`` list is empty and the caller should poll later.
+        """
+        batch = self.client.batches.retrieve(batch_id)
+        counts = getattr(batch, "request_counts", None)
+        total = getattr(counts, "total", 0) if counts else 0
+        completed = getattr(counts, "completed", 0) if counts else 0
+        failed = getattr(counts, "failed", 0) if counts else 0
+
+        results: list[BatchImageResult] = []
+        if batch.status == "completed" and batch.output_file_id:
+            results = self._collect_batch_results(batch.output_file_id)
+
+        return BatchStatus(
+            batch_id=batch.id,
+            status=batch.status,
+            total=total,
+            completed=completed,
+            failed=failed,
+            results=results,
+        )
+
+    def _collect_batch_results(self, output_file_id: str) -> list[BatchImageResult]:
+        """Read the JSONL output file and decode each request's image."""
+        content = self.client.files.content(output_file_id).text
+        out: list[BatchImageResult] = []
+        for line in content.splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            custom_id = record.get("custom_id", "")
+            err = record.get("error")
+            if err:
+                out.append(
+                    BatchImageResult(
+                        custom_id=custom_id,
+                        image_bytes=None,
+                        mime_type="",
+                        error=str(err),
+                        usage=None,
+                    )
+                )
+                continue
+            response = record.get("response") or {}
+            body = response.get("body") or {}
+            data = body.get("data") or [{}]
+            image_b64 = data[0].get("b64_json")
+            if not image_b64:
+                out.append(
+                    BatchImageResult(
+                        custom_id=custom_id,
+                        image_bytes=None,
+                        mime_type="",
+                        error="response missing b64_json",
+                        usage=None,
+                    )
+                )
+                continue
+            usage_raw = body.get("usage") or {}
+            details = usage_raw.get("input_tokens_details") or {}
+            usage = {
+                "input_tokens": usage_raw.get("input_tokens", 0) or 0,
+                "output_tokens": usage_raw.get("output_tokens", 0) or 0,
+                "text_tokens": details.get("text_tokens", 0) or 0,
+                "image_tokens": details.get("image_tokens", 0) or 0,
+                "cached_tokens": details.get("cached_tokens", 0) or 0,
+            }
+            out.append(
+                BatchImageResult(
+                    custom_id=custom_id,
+                    image_bytes=base64.b64decode(image_b64),
+                    mime_type="image/png",
+                    error=None,
+                    usage=usage,
+                )
+            )
+        return out
+
+
+@dataclass
+class BatchImageJob:
+    """One image generation request to include in a batch submission."""
+
+    custom_id: str  # caller-defined; round-trips through the batch and identifies the result
+    prompt: str
+
+
+@dataclass
+class BatchImageResult:
+    custom_id: str
+    image_bytes: bytes | None
+    mime_type: str
+    error: str | None
+    usage: dict[str, int] | None  # raw counters from the response, if available
+
+
+@dataclass
+class BatchStatus:
+    """Snapshot of an OpenAI batch's progress + downloaded results when complete."""
+
+    batch_id: str
+    status: str  # validating | in_progress | finalizing | completed | failed | cancelled | expired
+    total: int
+    completed: int
+    failed: int
+    results: list[BatchImageResult]  # populated only when status == "completed"
+
+
+def _image_batch_jsonl(jobs: list[BatchImageJob], *, model: str, size: str) -> str:
+    """Render the JSONL payload for ``/v1/batches`` image generation."""
+    lines: list[str] = []
+    for j in jobs:
+        record = {
+            "custom_id": j.custom_id,
+            "method": "POST",
+            "url": "/v1/images/generations",
+            "body": {"model": model, "prompt": j.prompt, "size": size},
+        }
+        lines.append(json.dumps(record, ensure_ascii=False))
+    return "\n".join(lines) + "\n"
 
 
 def _extract_retry_after(error: APIError) -> float | None:

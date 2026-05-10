@@ -23,7 +23,12 @@ from pydantic import BaseModel
 from rich.console import Console
 
 from yonkomatic import __version__
-from yonkomatic.ai.openai_client import ImageResult, OpenAIClient, UsageTracker
+from yonkomatic.ai.openai_client import (
+    BatchImageJob,
+    ImageResult,
+    OpenAIClient,
+    UsageTracker,
+)
 from yonkomatic.config import Config, load_config
 from yonkomatic.news.fetcher import fetch_recent_headlines
 from yonkomatic.panel.description import (
@@ -838,6 +843,236 @@ def publish_today(
             f"(episode #{target_n} 「{target.title}」 of {target_week})",
         )
         raise
+
+
+def _default_batch_manifest_path(week: str) -> Path:
+    return Path("state/batches") / f"{week}.yaml"
+
+
+def _default_preflight_dir(week: str) -> Path:
+    return Path("output/preflight") / week
+
+
+@app.command("batch-submit-images")
+def batch_submit_images(
+    week: str = typer.Option(
+        ..., "--week", help="ISO week, e.g. 2026-W19."
+    ),
+    scenarios_path: Path | None = typer.Option(
+        None,
+        "--scenarios",
+        help="Scenarios YAML. Defaults to scenarios/{week}.yaml.",
+    ),
+    content_dir: Path = typer.Option(
+        Path("examples/minimal"), "--content"
+    ),
+    manifest_path: Path | None = typer.Option(
+        None,
+        "--out",
+        help="Where to write the batch manifest. Defaults to state/batches/{week}.yaml.",
+    ),
+    config_path: Path = typer.Option(Path("config.yaml"), "--config"),
+    text_model: TextModelOption = None,
+    image_model: ImageModelOption = None,
+) -> None:
+    """Render 7 image prompts (text LLM, sync) and submit a 50%-off image batch.
+
+    The text completions cost normal rates and run synchronously here so the
+    submitted batch contains finalised image prompts. Image generation is
+    deferred to the batch worker (up to 24h) and billed at half list price.
+    """
+    cfg = _apply_cli_overrides(
+        load_config(config_path), text_model=text_model, image_model=image_model
+    )
+    manifest_out = manifest_path or _default_batch_manifest_path(week)
+
+    if manifest_out.exists():
+        err_console.print(
+            f"[red]error:[/red] {manifest_out} already exists "
+            "(re-running would orphan the prior batch). Delete it manually if intended."
+        )
+        raise typer.Exit(code=1)
+
+    src = scenarios_path or Path("scenarios") / f"{week}.yaml"
+    with _fail_on("load week scenarios"):
+        week_data = ScenarioWeek.model_validate(
+            yaml.safe_load(src.read_text(encoding="utf-8"))
+        )
+    if week_data.week != week:
+        err_console.print(
+            f"[yellow]warning:[/yellow] scenarios file says week={week_data.week} "
+            f"but --week={week}; using --week."
+        )
+
+    with _fail_on("load content pack"):
+        pack = ContentPack.from_dir(content_dir, content_cfg=cfg.content)
+
+    tracker = UsageTracker()
+    openai = _build_openai_client(cfg, usage_tracker=tracker)
+    panel_template = resolve_template_path(
+        template_filename=_PANEL_TEMPLATE_FILENAME,
+        content_dir=content_dir,
+        builtin_dir=_builtin_templates_dir(),
+    )
+
+    jobs: list[BatchImageJob] = []
+    job_meta: list[dict[str, Any]] = []
+    for ep in week_data.episodes:
+        cid = f"{week}-ep{ep.episode_number}"
+        console.print(
+            f"rendering prompt for [cyan]{cid}[/cyan] 「{ep.title}」 "
+            f"(via {cfg.ai.text_model})…"
+        )
+        with _fail_on(f"prompt generation failed for {cid}"):
+            image_prompt, rendered = build_image_prompt(
+                episode=ep,
+                pack=pack,
+                openai=openai,
+                template_path=panel_template,
+            )
+        jobs.append(BatchImageJob(custom_id=cid, prompt=image_prompt))
+        job_meta.append(
+            {
+                "custom_id": cid,
+                "episode_number": ep.episode_number,
+                "title": ep.title,
+                "rendered_panel_prompt": rendered.as_combined_text(),
+                "rendered_image_prompt": image_prompt,
+            }
+        )
+
+    console.print(
+        f"submitting batch ({len(jobs)} jobs, {cfg.ai.image_model}, "
+        f"size={cfg.ai.image_size})…"
+    )
+    with _fail_on("batch submit failed"):
+        batch_id = openai.submit_image_batch(jobs=jobs, size=cfg.ai.image_size)
+
+    manifest = {
+        "week": week,
+        "batch_id": batch_id,
+        "submitted_at": datetime.now(ZoneInfo("UTC")).isoformat(),
+        "text_model": cfg.ai.text_model,
+        "image_model": cfg.ai.image_model,
+        "image_size": cfg.ai.image_size,
+        "status": "submitted",
+        "jobs": job_meta,
+        "text_usage": tracker.summary(),
+        "fetched_at": None,
+        "results": [],
+    }
+    manifest_out.parent.mkdir(parents=True, exist_ok=True)
+    manifest_out.write_text(
+        yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    console.print(
+        f"[green]✓ submitted[/green] batch [cyan]{batch_id}[/cyan]; "
+        f"manifest at [dim]{manifest_out}[/dim]"
+    )
+    console.print(
+        "  poll with: [bold]yonkomatic batch-fetch-images "
+        f"--week {week}[/bold]"
+    )
+    _print_usage_summary(tracker)
+
+
+@app.command("batch-fetch-images")
+def batch_fetch_images(
+    week: str = typer.Option(..., "--week"),
+    manifest_path: Path | None = typer.Option(
+        None,
+        "--manifest",
+        help="Path to the batch manifest. Defaults to state/batches/{week}.yaml.",
+    ),
+    out_dir: Path | None = typer.Option(
+        None,
+        "--out-dir",
+        help="Where to save fetched images. Defaults to output/preflight/{week}/.",
+    ),
+    config_path: Path = typer.Option(Path("config.yaml"), "--config"),
+) -> None:
+    """Poll a submitted batch and download images when complete.
+
+    Idempotent: re-running on a completed batch overwrites the same paths.
+    Until the batch reaches ``completed``, only progress is printed.
+    """
+    cfg = load_config(config_path)
+    manifest_in = manifest_path or _default_batch_manifest_path(week)
+    save_dir = out_dir or _default_preflight_dir(week)
+
+    if not manifest_in.exists():
+        err_console.print(
+            f"[red]error:[/red] manifest {manifest_in} not found "
+            f"(run batch-submit-images --week {week} first)"
+        )
+        raise typer.Exit(code=1)
+
+    manifest = yaml.safe_load(manifest_in.read_text(encoding="utf-8")) or {}
+    batch_id = manifest.get("batch_id")
+    if not batch_id:
+        err_console.print(f"[red]error:[/red] manifest has no batch_id: {manifest_in}")
+        raise typer.Exit(code=1)
+
+    tracker = UsageTracker()
+    openai = _build_openai_client(cfg, usage_tracker=tracker)
+
+    console.print(f"polling batch [cyan]{batch_id}[/cyan]…")
+    with _fail_on("batch fetch failed"):
+        status = openai.fetch_image_batch(batch_id)
+
+    console.print(
+        f"  status: [bold]{status.status}[/bold] "
+        f"({status.completed}/{status.total} done, {status.failed} failed)"
+    )
+
+    if status.status != "completed":
+        console.print(
+            "[yellow]not yet complete[/yellow] — try again later "
+            "(OpenAI batches finish within 24h of submission)"
+        )
+        return
+
+    save_dir.mkdir(parents=True, exist_ok=True)
+    cid_to_meta = {j["custom_id"]: j for j in manifest.get("jobs", [])}
+    result_records: list[dict[str, Any]] = []
+
+    for r in status.results:
+        meta = cid_to_meta.get(r.custom_id, {})
+        ep_num = meta.get("episode_number")
+        record = {
+            "custom_id": r.custom_id,
+            "episode_number": ep_num,
+            "title": meta.get("title"),
+            "image_path": None,
+            "error": r.error,
+            "usage": r.usage,
+            "cost_usd": None,
+        }
+        if r.error or r.image_bytes is None:
+            err_console.print(f"[red]✗[/red] {r.custom_id}: {r.error or 'no image'}")
+            result_records.append(record)
+            continue
+
+        filename = f"ep{ep_num}.png" if ep_num is not None else f"{r.custom_id}.png"
+        out_path = _save_image(save_dir / filename, r.image_bytes, r.mime_type)
+        record["image_path"] = str(out_path)
+        call = openai.record_batch_image_result(r)
+        if call is not None:
+            record["cost_usd"] = call.cost_usd
+        result_records.append(record)
+        console.print(f"[green]✓[/green] {r.custom_id} → [dim]{out_path}[/dim]")
+
+    manifest["status"] = "completed"
+    manifest["fetched_at"] = datetime.now(ZoneInfo("UTC")).isoformat()
+    manifest["results"] = result_records
+    manifest["image_usage"] = tracker.summary()
+    manifest_in.write_text(
+        yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    console.print(f"  manifest updated: [dim]{manifest_in}[/dim]")
+    _print_usage_summary(tracker)
 
 
 @app.command("generate-scenarios")
