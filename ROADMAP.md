@@ -8,11 +8,11 @@
 
 ## 現在地
 
-- **完了**: Step 1, Step 2, Step 3, Step 4, **Step 5 (5a/5b/5c/5d 全て + simplify)**, **Step 5e (実装 + A/B 検証完了)**, **Step 6 (実装完了 — テンプレ化 + OpenAI 切替 + 構造刷新)**, **Step 6.5 (gpt-image-2 + 1536x2048 採用、6/7 完全一致 / 0/7 致命的)**, **batch CLI (週単位 50% off)**, **モデル別ガイダンス機構 (scenario / panel-prompt 両 LLM)**
-- **次**: 下記「次セッションの再開タスク」を片付けてから **Step 6.6 (Actions の batch 化)** → Step 7 (OSS 公開準備)
+- **完了**: Step 1〜4, **Step 5 全部** (5a/5b/5c/5d + simplify), **Step 5e** (実装 + A/B 検証、本番採用見送り), **Step 6** (テンプレ化 + OpenAI 切替 + 構造刷新), **Step 6.5** (gpt-image-2 → 960x1280 本番採用), **Step 6.6** (Actions の batch 化 — 実装は Step 6.5 と一体で完了済み)、batch CLI、モデル別ガイダンス機構 (scenario / panel-prompt 両 LLM)
+- **次**: Step 6.7 (batch 失敗時の自動リトライ) → Step 7 (OSS 公開準備、**運用ディレクトリ集約**を含む)
 - **ブロッカー**: なし
 
-最終更新: 2026-05-10 (新ガイダンス効果評価 ep1/ep5 + 画像サイズ最適化で **960x1280 を本番デフォルト採用**。Step 6.6 (Actions の batch 化) を追加。**参考画像を両 LLM ステージに告知する配線を実装** — 実 API 検証は残)
+最終更新: 2026-05-10 (Step 6.6 を実態に合わせて ✅ に整合化、Step 6.7 を切り出し、Step 7 に運用ディレクトリ集約を追加。live ブランチを履歴ごと削除 + main 起点で新規作成、Default branch = main に切替)
 
 ### 次セッションの再開タスク (Step 6.5 余波)
 
@@ -316,31 +316,62 @@ yonkomatic batch-fetch-images --week 2026-W21
 
 (`publish-today` への自動連携は Step 7 で実装予定)
 
-### ⏳ Step 6.6 — GitHub Actions も batch 画像生成に切替
+### ✅ Step 6.6 — GitHub Actions も batch 画像生成に切替 (実装完了、Step 6.5 と一体)
 
-**背景**: 現状の `daily-publish.yml` は毎朝 sync で 1 話ぶん画像生成 ($0.27/枚 × 7 = $1.89/週)。`batch-submit-images` / `batch-fetch-images` を使えば 50% off ($0.95/週)。週次で一括投入し、日次は fetch + publish のみで済む。
+**背景**: `daily-publish.yml` を sync 毎朝 ($0.27/枚 × 7 = $1.89/週) から batch 経由 ($0.95/週、50% off) に切替える。週次で一括投入し、日次は fetch + publish のみで済ませる。
 
-**スコープ**:
-1. `weekly-scenarios.yml` を拡張: scenarios 生成直後に `batch-submit-images --week W` を実行 (24h cap で完走想定、月曜 09:00 JST には fetch 可能)
-2. `daily-publish.yml` を改修: `publish-today` 内部で「preflight 画像が存在すれば再生成せず使う」分岐を追加 (画像 API コール skip)
-3. preflight 画像が無いケース (batch 失敗 / 未投入) は従来通り sync で生成 (フォールバック)
-4. 月曜の `daily-publish` で `batch-fetch-images` を先行実行する step を追加
+**実装場所**: スコープ 4 項目すべて Step 6.5 の commit `c829994` (「feat: 週次バッチ生成 + 日次 publish の preflight 自動採用」) で組み込み済み。当時 ROADMAP の更新が漏れて Step 6.6 を ⏳ のまま残していたが、2026-05-10 に整合化した。
+
+| ROADMAP スコープ | 実装場所 |
+|------------------|----------|
+| weekly-scenarios で `batch-submit-images` 投入 | `.github/workflows/weekly-scenarios.yml:43-46` |
+| daily-publish で `batch-fetch-images` 先行実行 | `.github/workflows/daily-publish.yml:37-46` (`continue-on-error: true`) |
+| publish-today: preflight があれば再生成 skip | `src/yonkomatic/cli.py:702-755` (`use_preflight=True` がデフォルト) |
+| preflight 不在時の sync フォールバック | 同上 (`else` 分岐で `build_image_prompt` + `_run_openai_image`) |
+
+**完了条件 (達成済み)**:
+- 月〜日 7 日分の画像が batch 経由で生成される配線になっている (cron 連鎖)
+- batch 失敗時は sync フォールバックで投稿は継続される (`continue-on-error` + `_publish_episode_pipeline` の preflight 不在分岐)
+- `state/batches/{week}.yaml` の status を見て manifest の挙動を分岐できる
+
+**残課題 (Step 6.7 に送り)**: batch が 24h 以内に完走しなかった場合の自動リトライ戦略 (ユーザー指定方針: 当日 sync + 翌日以降 batch 再投入)。
+
+**実運用検証の扱い**: 本来は live ブランチで 1 週間 cron 観察を予定していたが、live を 2026-05-10 に履歴ごと削除 + 新規作成したため運用パターンが定まっていない。実運用検証は Step 7 (OSS 公開準備) で運用ディレクトリ集約 + 利用者ブランチ運用の再設計と合わせて行う。
+
+### ⏳ Step 6.7 — batch 失敗時の自動リトライ (Step 6.6 の発展)
+
+**背景**: Step 6.6 の cron 運用で batch が 24h 以内に完走しない / failed した場合に、人手介入なしで投稿を継続する。Step 6.5 の CLI (`batch-submit-images` / `batch-fetch-images`) は手動運用前提なので、自動リカバリパスを追加する。
+
+**スコープ (ユーザー指定方針 2026-05-10)**:
+1. その日の preflight が無ければ fetch を試行 (実装済み = Step 6.6)
+2. fetch しても無ければ sync 生成 (実装済み = Step 6.6)
+3. **publish 後に week 内の未投稿エピソード (今日以降) で preflight 不在のものがあれば新規 batch を投入** (本 Step で新規実装)
+
+**実装方針**:
+- CLI に `batch-resubmit-missing --week W` を追加: 既存 manifest と `output/preflight/{week}/` を照合し、不在エピソード分のみを新規 batch に投入
+- manifest 構造拡張: 既存 `state/batches/{week}.yaml` に `retries: [...]` 配列を追加 (1 ファイルで完結) または `{week}-r1.yaml` 等のバージョン分割 (履歴が独立)。着手時に決める
+- `_load_batch_job_meta` / `_find_preflight_image` を複数 manifest 対応に拡張 (preflight 化済みエピソードのメタを正しく archive に復元するため)
+- `daily-publish.yml` の `Publish today's episode` 直後に `batch-resubmit-missing` step を `continue-on-error: true` で追加
 
 **完了条件**:
-- 通常運用で月〜日 7 日分の画像が batch 経由で生成され、daily-publish は fetch + publish のみで動く
-- batch 失敗時は sync フォールバックで投稿は継続される (cron が止まらない)
-- `state/batches/{week}.yaml` の status を見て分岐できる
+- batch failed/expired 翌日には残り日数分の新規 batch が自動投入される
+- preflight が再び揃った日からは自動的に preflight 経由で publish される
+- 既に投稿済みのエピソードは再投入されない (ムダ排除)
 
-**未決事項**: batch が 24h 以内に完走しなかった場合のリトライ戦略 (週途中で batch_id を再投入するか、その日だけ sync で繋ぐか)。
+**未決事項 (着手時に確定)**:
+- 再投入の上限回数 (失敗が続いた場合に sync 永続化に倒すか)
+- batch_id 履歴の管理形式 (manifest 内追記 vs 別ファイル)
 
-### ⏳ Step 7 — OSS 公開準備 (旧 Step 6) (次)
+### ⏳ Step 7 — OSS 公開準備 (旧 Step 6)
 
+- **運用ディレクトリ集約**: `scenarios/`, `state/`, `output/`, `docs/` の repo ルート散在を 1 ディレクトリ (e.g. `runtime/` or `data/`) に集約。`.gitignore` の管理、利用者の運用データのバックアップ/削除、テンプレート fork 後の初期化を簡単にする。影響範囲: `cli.py` の出力先パス全箇所、`config.yaml` の `static_site.output_dir`、両 GHA workflow の commit パス、README/SETUP/CLAUDE.md の運用説明
 - README に Quick Start + デモ画像
-- SETUP.md を fork / branch 戦略まで含めて拡充 (`.gitignore` 緩和、Default branch = live、Secrets、Workflow permissions の手順)
+- SETUP.md を fork / branch 戦略まで含めて拡充 (`.gitignore` 緩和、Default branch、Secrets、Workflow permissions の手順)
 - ユニットテスト (API はモック)
 - GitHub Template Repository 設定
 - LICENSE / CONTRIBUTING.md
 - 自分の素材で稼働させた本番サンプルを README に掲載
+- **実運用検証 (Step 6.6 から繰越)**: 集約 + 利用者ブランチ運用が確定したタイミングで Step 6.6 の cron を 1 週間観察し、preflight 利用率と batch 完走率を ROADMAP に記録
 
 完了条件: 第三者が README 通り 30 分以内で自分の漫画ボットを立ち上げられる。
 
@@ -350,6 +381,8 @@ yonkomatic batch-fetch-images --week 2026-W21
 
 新しい決定が出たら頭に追加。古いものは削除せず残す。
 
+- **2026-05-10 (Step 6.6 整合化 + Step 6.7 切り出し + Step 7 拡張)** Step 6.6 のスコープ 4 項目は実装としては Step 6.5 と同時 (`c829994` 「feat: 週次バッチ生成 + 日次 publish の preflight 自動採用」) に組み込まれていたため ROADMAP を実態に合わせて ✅ に整合化。残課題「batch 失敗時のリトライ」を Step 6.7 に切り出し、ユーザー指定方針 (当日無ければ sync、翌日以降を batch 再投入) をスコープとして明文化。実装は実運用で失敗ケースの実態を見てから着手する。Step 7 (OSS 公開準備) のスコープに「運用ディレクトリ集約」(`scenarios/state/output/docs` を 1 ディレクトリにまとめる) を追加。
+- **2026-05-10 (live ブランチを履歴ごと削除 + 新規作成、Default = main)** 旧 live が Step 5d 時代の汚れた状態 (config: text_rendering / anthropic+google deps / 旧 4 フォルダ content) で残っていたため、`gh repo edit --default-branch main` → `git push origin --delete live` → `git branch -D live` で remote + local + Default branch 設定を整理。直後に main 起点で `git checkout -b live && git push -u origin live` で新規 live を作成 (HEAD は main と同一)。利用者カスタム (`.gitignore` 緩和等) は Step 7 (運用ディレクトリ集約) で再設計してから乗せる。Default branch は main のままなので、cron は main の workflow で走り、main の `.gitignore` で scenarios/state/output/docs が ignore のため bot commit は skip される (Slack 投稿の API コールは走る点に注意、Step 7 まで暫定)。
 - **2026-05-10 (画像サイズ 960x1280 を本番採用)** ep1 を 768/960/1152/1536 (px) で sync 生成して比較 (計 $0.53)、**960x1280 を本番デフォルトに採用** (`config.yaml` 反映済み)。sync $0.18 / batch 推定 $0.09、Slack 表示で全 dialogue + SFX 視認可、1536x2048 比 -33% コスト。768x1024 は Slack で文字が潰れて不採用、1152x1536 は SFX「ぶいーん」が矢印アイコン化される現象が 1 例で出たため将来の印刷向け候補として保留、1536x2048 は印刷品質が必要な場合のみ opt-in。実コストは output_tokens に比例し、ピクセル数 4x でも tokens は 1.85x 程度しか増えないことが判明 (Step 6.5 当時の見積より乖離小)。
 - **2026-05-10 (Step 6.6 追加)** GitHub Actions も batch 画像生成に切り替える Step 6.6 を追加。weekly-scenarios で scenarios 生成→batch-submit-images、daily-publish で batch-fetch-images→publish-today (画像再生成 skip)。週次 $1.89 → $0.95 (50% off)。batch 失敗時の sync フォールバックは別途設計。
 - **2026-05-10 (CLI 拡張)** `test panel` に `--image-size` フラグを追加 (`_apply_cli_overrides` を image_size 対応に拡張)。サイズ比較用途を想定。publish/publish-today/batch-submit-images にも将来同様のフラグ追加余地あり (現時点では config.yaml の編集で十分)。
