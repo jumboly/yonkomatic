@@ -9,6 +9,13 @@ AI が毎日 4 コマ漫画を描き、Slack / 静的サイトへ自動投稿す
 
 ## Demo
 
+**ライブデモ** — このリポジトリを fork して 1 日 1 話の自動投稿が走り続けている公開リポジトリ:
+
+- ライブサイト: <https://www.jumboly.jp/yonkomatic-demo/>
+- demo リポジトリ: <https://github.com/jumboly/yonkomatic-demo>
+
+upstream (このリポジトリ) と同じコードベースに、後述のサンプル素材だけを使い、毎週月〜日に新しい 4 コマが追加されます。挙動・出力品質・運用コストの実例として参照してください。
+
 実際に gpt-image-2 が出力した本番品質サンプル (W21、960×1280):
 
 | ep4 「静かな通知音」 | ep5 「傘の待機列」 |
@@ -16,7 +23,7 @@ AI が毎日 4 コマ漫画を描き、Slack / 静的サイトへ自動投稿す
 | ![夜の部屋でかすかな電子音の正体を探す 4 コマ漫画 (W21 ep4 静かな通知音)](assets/demo/2026-w21-ep4-quiet-notification.png) | ![降りそうで降らない空の下、玄関で傘 1 本を相談する 4 コマ漫画 (W21 ep5 傘の待機列)](assets/demo/2026-w21-ep5-umbrella-queue.png) |
 | 夜の部屋でかすかな電子音の正体を探す。便利なものほど、思わぬところで存在感を出してくる。 | 空があやしい昼下がり、玄関で傘をどうするか相談する。降る前の迷い方に、それぞれの性格が出る。 |
 
-公開デモサイト: fork 後に gh-pages を有効化すると `https://<your-name>.github.io/yonkomatic/` で同等のサイトが立ちます (上流テンプレでは cron 停止のため deploy されません)。
+自分の fork で同等のサイトを立てる手順は [`SETUP.md`](SETUP.md) §10 を参照 (上流テンプレでは cron 停止のため deploy されません)。
 
 ## Quick Start
 
