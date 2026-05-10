@@ -8,11 +8,46 @@
 
 ## 現在地
 
-- **完了**: Step 1, Step 2, Step 3, Step 4, **Step 5 (5a/5b/5c/5d 全て + simplify)**, **Step 5e (実装 + A/B 検証完了)**, **Step 6 (実装完了 — テンプレ化 + OpenAI 切替 + 構造刷新)**, **Step 6.5 (gpt-image-2 + 1536x2048 採用、6/7 完全一致 / 0/7 致命的)**, **batch CLI (週単位 50% off)**
-- **次**: Step 7 (OSS 公開準備)
-- **ブロッカー**: 解消。gpt-image-2 + 1536x2048 (真の 3:4) で W19 全 7 話再検証して **完全一致 86% / 致命的 0%** を確認。残る 1/7 は話者スワップ (テキストは一字一句一致) のみ
+- **完了**: Step 1, Step 2, Step 3, Step 4, **Step 5 (5a/5b/5c/5d 全て + simplify)**, **Step 5e (実装 + A/B 検証完了)**, **Step 6 (実装完了 — テンプレ化 + OpenAI 切替 + 構造刷新)**, **Step 6.5 (gpt-image-2 + 1536x2048 採用、6/7 完全一致 / 0/7 致命的)**, **batch CLI (週単位 50% off)**, **モデル別ガイダンス機構 (scenario / panel-prompt 両 LLM)**
+- **次**: 下記「次セッションの再開タスク」を片付けてから Step 7 (OSS 公開準備)
+- **ブロッカー**: なし
 
-最終更新: 2026-05-10 (Step 6.5 完了 + gpt-image-2 採用 + batch コマンド追加)
+最終更新: 2026-05-10 (モデル別ガイダンス + batch CLI 実走確認、品質再評価は次セッション)
+
+### 次セッションの再開タスク (Step 6.5 余波)
+
+**1. 新ガイダンスの画像レイヤ効果評価**
+
+- batch で 2 話生成済み: `tmp/batch-W19-imgs/ep1.png` (風の向きの会議) / `ep5.png` (音だけ先に夏)
+- 元シナリオは `tmp/W19-with-guidance.yaml` (新 guidance 適用、SFX 込み、verbatim 角度のキャラ anchor)
+- batch manifest: `tmp/batch-W19-test.yaml` (status: completed, image batch $0.274 = sync の半額)
+- 突き合わせ観点: dialogue 一字一句一致 / SFX (『さわ』『ぶいーん』『りーん』) が描き込まれているか / panel 数厳守 / 話者スワップの有無
+- Step 6.5 のベースライン (`output/step6.5-gpt-image-2/`) と比較して新 guidance が **画像品質を実際に向上させたか** を判定
+
+**2. 画像サイズ最適化検討**
+
+現在 `image_size: "1536x2048"` (3.15M pixels) は過剰の可能性あり ($0.27/枚)。gpt-image-2 が受け付ける真の 3:4 候補 (16 倍数 / 比率 3:1 以下):
+
+| サイズ | 総 pixels | 推定/枚 | batch (50%) | 備考 |
+|---|---|---|---|---|
+| 768x1024 | 786K | ~$0.07 | ~$0.035 | 試作向け |
+| 960x1280 | 1.23M | ~$0.11 | ~$0.055 | Slack 表示十分 |
+| **1152x1536** | **1.77M** | **~$0.16** | **~$0.08** | **バランス候補** |
+| 1536x2048 (現行) | 3.15M | ~$0.27 | ~$0.135 | 印刷向け、過剰気味 |
+
+判定方法: 同シナリオを 2-3 サイズで生成して並べて目視比較 (cost ~$0.30-0.50)。Slack/static_site の実表示サイズ (端末で 1024px 程度に縮小される) を踏まえて決定。
+
+**3. 参考画像を LLM ステージにも渡す機構 (Option A + 軽量 B)**
+
+現状: `pack.images` (`content/images/*`) は **画像生成 (Stage 3) にしか渡っていない**。両 LLM (Stage 1 シナリオ / Stage 2 panel-prompt) は知らない。
+
+実装方針 (設計済み未着手):
+
+- **A**: テンプレ変数 `{{reference_image_count}}` + `{{reference_image_filenames}}` を追加、両 system prompt に「N 枚の参考画像が画像モデルに渡される」と告知
+- **軽量 B**: panel-prompt 側 guidance に「英語プロンプトでは `Image 1: ...` 形式で順序参照する」(OpenAI cookbook 推奨パターン) を明示。利用者は `prompt.md` の `## 参考画像` セクションで各ファイルの意味を書けば LLM が活用する
+- **C (将来)**: gpt-5.4 のマルチモーダル機能で実画像を LLM に見せる
+
+`_collect_images` は sorted で安定順なので index 参照は OK。`examples/minimal/prompt.md` に `## 参考画像` の書式例を追記すると利用者が真似しやすい。
 
 ---
 
