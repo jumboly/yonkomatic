@@ -385,6 +385,7 @@ yonkomatic batch-fetch-images --week 2026-W21
 
 新しい決定が出たら頭に追加。古いものは削除せず残す。
 
+- **2026-05-10 (test-slack workflow で動作確認成功)** Step 7 着手前のテンプレ品質確認として `gh workflow run test-slack.yml -R jumboly/yonkomatic` を 1 回 trigger (`run 25623050101`)、11 秒で緑、Slack に test 画像投稿成功。workflow_dispatch / Secrets (SLACK_BOT_TOKEN + SLACK_CHANNEL_ID) / `uv sync --frozen` / `yonkomatic test slack` コマンドの経路すべて健全。Annotations に Node.js 20 deprecation 警告と GitHub のキャッシュサービス一時障害 (test 本体には影響なし) が出ているが、後者は GitHub 側、前者は別途対応 (下記 Gotchas)。weekly-scenarios / daily-publish の本格動作確認は Step 7 (gh-pages 分離) 後。
 - **2026-05-10 (Step 7 のスコープを「運用ディレクトリ集約」→「生成物の別ブランチ分離 (gh-pages)」に置換)** 当初案では `scenarios/state/output/docs` を 1 ディレクトリ (`runtime/` 等) に集約する計画だったが、それより一歩進んで **main = コードのみ、生成物は gh-pages 等の別ブランチに orphan push** する方針に切替。理由: (a) main の diff が cron 生成物で汚れず上流追従が綺麗、(b) fork 利用者の `.gitignore` 緩和が不要になる (生成物は別ブランチに行くため)、(c) GitHub Pages は gh-pages ブランチを直接公式 deploy 対象にできる。トレードオフは workflow が二段階 commit (main にコード / gh-pages に生成物) になる複雑度だが、`peaceiris/actions-gh-pages` 等の既製 Action で吸収可能。state.yaml は workflow が gh-pages を sparse checkout → 読み書き → push する形にする。1 ブランチ (gh-pages) でまとめるか、static-site 用 (`gh-pages`) と運用データ用 (`run-data`) に分けるかは Step 7 着手時に確定。
 - **2026-05-10 (`examples/minimal` を `content/` に統合)** 動作確認用サンプル素材 (`prompt.md` / `images/*.png` / `sample-scenario.yaml`) を `content/` に直接置く構造に変更 (commit `c4492bd`)。`cp -R examples/minimal/* content/` の手順が不要になり、テンプレ → fork → カスタマイズの流れが simpler。`.gitattributes` に `content/* merge=ours` を設定し、fork 先で利用者カスタムが upstream 更新と衝突しないようにした (利用者は `git config --add merge.ours.driver true` で driver を一度有効化する必要あり)。`cli.py` の 6 箇所のデフォルト Path も `examples/minimal` → `content` に変更、SPEC/CLAUDE/README/SETUP のディレクトリ記述も一新。
 - **2026-05-10 (運用方針転換: 上流テンプレ専用化 + fork 運用)** 同日中に「main → live → main」と Default branch を行き来した試行を経て、最終方針を「**上流リポ (`jumboly/yonkomatic`) はテンプレ専用、自前運用は private fork で行う**」に確定。理由: live と main の二重運用は手動 sync / `.gitignore` 緩和の merge 競合 / 二重の責務管理が面倒で、利用者と作者が同じパターン (fork → main で運用) で動かせる方が README/SETUP が単純化される。本コミットで実施: (a) live ブランチ削除 (remote + local)、Default = main、(b) 両 workflow (`weekly-scenarios.yml` / `daily-publish.yml`) の `schedule:` をコメントアウトして上流での cron 自動実行を停止 (`workflow_dispatch` は残し手動実行は可)、(c) 上流テンプレでは Slack API コール / OpenAI API コール共に走らない暫定運用が確立。次のステップ: Step 7 で README/SETUP に fork 前提の運用フロー (Secrets 設定 / `.gitignore` 緩和 / cron 有効化) を記述、その後 private fork を作成して動作確認。
@@ -441,6 +442,7 @@ yonkomatic batch-fetch-images --week 2026-W21
 
 ## 既知の挙動・注意 (Gotchas)
 
+- **GitHub Actions runner の Node.js 20 deprecation**: `actions/checkout@v4`, `astral-sh/setup-uv@v3` は Node.js 20 ベースで、2026-09-16 に runner から Node.js 20 が除去される。それまでに各 action を Node.js 24 対応版に上げる必要 (Step 7 の workflow 改修時に併せて対応推奨)。暫定的に `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` を env で設定して opt-in も可能。
 - **OpenAI SDK バージョン**: `openai>=1.50.0` を使用 (`chat.completions` + `beta.chat.completions.parse` + `images.generate` / `images.edit`)。
 - **OpenAI 画像 size の表記**: Gemini の "1K"/"2K" tier ではなく px 表記 (`"1024x1024"` / `"1024x1536"` / `"1536x1024"`)。yonkomatic の縦長 4 コマは `1024x1536` (3:4) が native。
 - **gpt-image-1 のレート制限と料金**: 実装着手時 (2026-05-10) 詳細未調査。初回呼び出し時に確認しここに追記する。
