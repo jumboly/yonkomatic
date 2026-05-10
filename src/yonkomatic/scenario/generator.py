@@ -27,16 +27,36 @@ _TEMPERATURE = 0.8
 # a weak one is steered toward simpler, lower-risk scenarios.
 # Keys are matched against ``image_model`` exactly first, then by prefix
 # (so e.g. ``gpt-image-2-2026-04-21`` falls back to ``gpt-image-2``).
+#
+# Numbers in the gpt-image-2 entry (95-99% CJK accuracy, 15 chars/bubble
+# threshold, 25% hand-pose failure rate, 6-8 panel face-drift threshold)
+# are sourced 2026-05-10 from:
+#   - developers.openai.com/cookbook/examples/multimodal/image-gen-models-prompting-guide
+#   - floatboat.ai/blog/gpt-image-2-manga-comic-workflow
+#   - openai.com/index/introducing-chatgpt-images-2-0
+# Update this table when OpenAI publishes new benchmarks or when our
+# own validation runs (ROADMAP "Step 6.5") shift the failure profile.
 _IMAGE_MODEL_GUIDANCE: dict[str, str] = {
     "gpt-image-2": (
-        "画像生成モデルは **gpt-image-2** (2026-04-21 リリース) を使用します。"
-        "日本語テキスト描画精度・指示遵守ともに高水準で、comics をユースケース筆頭に謳うモデルです。\n\n"
-        "能力を最大限活かす指針:\n"
-        "- **dialogue**: 4 コマで合計 6〜8 吹き出し (1 パネル平均 1.5〜2 吹き出し) まで余裕があります。台詞のリズムや掛け合いの応酬で魅せてください\n"
-        "- **擬音**: 「ぽふ」「トン」「ピッ」のような効果音は dialogue ではなく `description` 内で指示してください (例: 「画面右下に小さく『ぽふ』の擬音」)。漫画らしさが増します\n"
-        "- **構図**: 寄り (バストアップ) と引き (全身) の切替、視点の前後を panel ごとに積極的に変えて構いません — モデルは正確に追随します\n"
-        "- **文字種**: 漢字・ひらがな・カタカナを混在させて自然な台詞にしてかまいません (誤字幻覚は出にくい)\n"
-        "- **話者位置**: 左右や前後の配置は場面の自然さで決めて OK。ただし話者スワップが稀に出るので、**話者の特徴 (服装・髪・小物) を description に毎パネル明記**して曖昧さを残さないこと"
+        "画像生成モデルは **gpt-image-2** (2026-04-21 リリース、`/v1/images/generations`) を使用します。"
+        "ChatGPT Images 2.0 の API 版で、reasoning (思考) を画像生成前に行うため、"
+        "前世代 (gpt-image-1) と比べて指示遵守・テキスト精度・空間整合が劇的に向上しています。\n\n"
+        "## 公式ベンチマーク確認済みの強み\n"
+        "- **CJK テキスト精度 ~95-99%**: 日本語・中国語・韓国語で文字レベル一致。漢字・ひらがな・カタカナ混在の自然な台詞を恐れず書ける\n"
+        "- **マルチパネル構図最適化**: comics をユースケース筆頭に謳い、4 コマや webtoon のような縦並びレイアウトに強い\n"
+        "- **Reasoning 内蔵**: 描画前に構図・空間関係・テキスト整合を内部検証する。yonkomatic の検証 (W19 全 7 話) で完全一致 6/7 / 致命的バグ 0/7 を確認済み\n\n"
+        "## 既知の制約 (シナリオで回避)\n"
+        "- **1 吹き出し 15 字超で精度低下**: 長い台詞は文を 2 つに分けるか改行を入れる。30 字制限はそのまま守りつつ、できれば 15 字以内に収める\n"
+        "- **動的ポーズの手は ~25% 失敗**: 「指差し」「物を握る」などをオチの決め手に使わない (失敗時にネタが崩壊する)。手は支えに留め、オチは表情・台詞で取る\n"
+        "- **6-8 パネル超で顔ドリフト**: 4 コマ範囲なら気にしなくてよい\n"
+        "- **話者スワップが稀発**: 同 panel に 2 人以上いると、台詞が逆のキャラに割り当てられることがある\n\n"
+        "## 能力を最大限活かす指針\n"
+        "- **dialogue 密度**: 4 コマで合計 6〜8 吹き出し (1 panel 平均 1.5〜2) まで安定。台詞のリズム・掛け合いの応酬で魅せる\n"
+        "- **擬音 (オノマトペ)**: 「ぽふ」「トン」「ピッ」「ザワッ」などは **dialogue ではなく description に書く** (例: 「画面右下に小さく『ぽふ』の擬音」)。dialogue 配列に入れると吹き出しになるが、効果音として浮かせたい場合は description 経由が正解\n"
+        "- **構図の切替**: panel ごとに寄り (バストアップ) と引き (全身)、視点の前後・俯瞰/煽りを積極的に変える。モデルは正確に追随する\n"
+        "- **話者の毎パネル再記述**: 各 description で話者の見た目特徴を具体的に再記述する (例: 「赤パーカのマチカが」「黒髪眼鏡のヨンコが」)。**パラフレーズせず一字一句同じ表現を繰り返す**ことでキャラ識別精度が上がる (公式 cookbook 推奨)\n"
+        "- **panel 間の時刻・場所差を明示**: 「同じ部屋」でも「カーテンが半開きになった」「夕日が差している」のような小さな変化を入れる。reasoning が時間経過を読み取り、4 コマ漫画として整える\n"
+        "- **negative constraint は不要**: 「文字を描くな」「ロゴを入れるな」などの禁止指示は panel-prompt 側 (英語化レイヤ) で扱う。シナリオ側は描いてほしい絵を素直に書けばよい"
     ),
     "gpt-image-1": (
         "画像生成モデルは **gpt-image-1** を使用します。日本語テキスト描画と指示遵守の両面で弱点があり、"
