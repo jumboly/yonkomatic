@@ -120,6 +120,7 @@ def generate_week(
         "prompt_main": pack.prompt,
         "news_block": _format_news_block(news_headlines),
         "image_model_guidance": _image_model_guidance(image_model),
+        "reference_images_block": pack.reference_images_block,
     }
     user = render(template.body, variables)
     # Why render(system) too: the system frontmatter now includes

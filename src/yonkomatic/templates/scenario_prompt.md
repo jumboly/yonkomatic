@@ -28,6 +28,7 @@ system: |
   - 特定の実在人物への言及
   - 商標・著作権のあるキャラやブランド名
 
+  {{reference_images_block}}
   ## 画像生成モデルの能力プロフィール
 
   {{image_model_guidance}}

@@ -143,6 +143,19 @@ class ContentPack:
             images=_collect_images(images_root, max_count=cfg.max_images),
         )
 
+    @property
+    def reference_images_block(self) -> str:
+        # Pre-rendered like _format_news_block: empty string when no images so
+        # the template doesn't carry a stranded heading or "0 枚" noise.
+        if not self.images:
+            return ""
+        files = "\n".join(f"- Image {i + 1}: {p.name}" for i, p in enumerate(self.images))
+        return (
+            f"# 参考画像 (画像モデルに {len(self.images)} 枚渡される)\n\n"
+            f"{files}\n\n"
+            "英語プロンプトでは Image 1, Image 2, ... の形式で順序参照する。\n"
+        )
+
 
 def _collect_images(root: Path, *, max_count: int) -> list[Path]:
     """Recursively glob the images tree for AI-acceptable image files.
@@ -237,6 +250,7 @@ def build_image_prompt(
         "prompt_main": pack.prompt,
         "image_model": image_model,
         "image_model_prompt_guidance": _panel_prompt_guidance(image_model),
+        "reference_images_block": pack.reference_images_block,
     }
     user = render(template.body, variables)
     system = render(template.system, variables)
