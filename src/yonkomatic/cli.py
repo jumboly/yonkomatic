@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from rich.console import Console
 
 from yonkomatic import __version__
-from yonkomatic.ai.openai_client import ImageResult, OpenAIClient
+from yonkomatic.ai.openai_client import ImageResult, OpenAIClient, UsageTracker
 from yonkomatic.config import Config, load_config
 from yonkomatic.news.fetcher import fetch_recent_headlines
 from yonkomatic.panel.description import (
@@ -177,12 +177,35 @@ def _generate_test_image(output_path: Path) -> None:
     image.save(output_path, format="PNG")
 
 
-def _build_openai_client(cfg: Config) -> OpenAIClient:
+def _build_openai_client(
+    cfg: Config, *, usage_tracker: UsageTracker | None = None
+) -> OpenAIClient:
     api_key = _require_env(cfg.ai.openai_api_key_env)
     return OpenAIClient(
         api_key=api_key,
         text_model=cfg.ai.text_model,
         image_model=cfg.ai.image_model,
+        usage_tracker=usage_tracker,
+    )
+
+
+def _print_usage_summary(tracker: UsageTracker) -> None:
+    """Print per-model token totals + run total at the end of a CLI command."""
+    if not tracker.calls:
+        return
+    summary = tracker.summary()
+    console.print("[bold]usage summary:[/bold]")
+    for model, agg in summary["per_model"].items():
+        tokens = ", ".join(f"{k}={v}" for k, v in agg["tokens"].items() if v)
+        console.print(
+            f"  [cyan]{model}[/cyan]: {agg['calls']} call(s), "
+            f"${agg['usd']:.4f} ({tokens or 'no usage data'})"
+        )
+    suffix = " [yellow](some models missing from price table)[/yellow]" \
+        if tracker.has_unknown_model else ""
+    console.print(
+        f"  [bold]total:[/bold] ${summary['total_usd']:.4f} "
+        f"across {summary['call_count']} call(s){suffix}"
     )
 
 
@@ -298,12 +321,14 @@ def test_image(
 ) -> None:
     """Generate one image with OpenAI and save it locally."""
     cfg = _apply_cli_overrides(load_config(config_path), image_model=image_model)
-    openai = _build_openai_client(cfg)
+    tracker = UsageTracker()
+    openai = _build_openai_client(cfg, usage_tracker=tracker)
     result = _run_openai_image(cfg, openai, prompt=prompt, refs=refs)
     saved = _save_image(output, result.image_bytes, result.mime_type)
     console.print(
         f"[green]✓ saved[/green] {saved} ({len(result.image_bytes)} bytes, {result.mime_type})"
     )
+    _print_usage_summary(tracker)
 
 
 @test_app.command("news")
@@ -374,7 +399,8 @@ def test_panel(
     pack = ContentPack.from_dir(content_dir, content_cfg=cfg.content)
     console.print(f"loaded content pack from [cyan]{content_dir}[/cyan]")
 
-    openai = _build_openai_client(cfg)
+    tracker = UsageTracker()
+    openai = _build_openai_client(cfg, usage_tracker=tracker)
     panel_template = resolve_template_path(
         template_filename=_PANEL_TEMPLATE_FILENAME,
         content_dir=content_dir,
@@ -400,6 +426,7 @@ def test_panel(
     console.print(
         f"[green]✓ saved[/green] {saved} ({len(result.image_bytes)} bytes, {result.mime_type})"
     )
+    _print_usage_summary(tracker)
 
 
 def _write_rendered_prompts(
@@ -520,6 +547,7 @@ def _write_archive(
     rendered_panel: RenderedPrompt,
     rendered_image_prompt: str,
     cfg: Config,
+    usage: UsageTracker | None = None,
 ) -> tuple[Path, Path]:
     archive_dir.mkdir(parents=True, exist_ok=True)
     image_path = _save_image(archive_dir / f"{date}.png", image_bytes, mime_type)
@@ -539,6 +567,8 @@ def _write_archive(
         "rendered_image_prompt": rendered_image_prompt,
         "image": {"mime_type": mime_type, "size_bytes": len(image_bytes)},
     }
+    if usage is not None and usage.calls:
+        meta["usage"] = usage.summary()
     meta_path.write_text(
         yaml.safe_dump(meta, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
@@ -629,7 +659,8 @@ def _publish_episode_pipeline(
     with _fail_on("load content pack"):
         pack = ContentPack.from_dir(content_dir, content_cfg=cfg.content)
 
-    openai = _build_openai_client(cfg)
+    tracker = UsageTracker()
+    openai = _build_openai_client(cfg, usage_tracker=tracker)
     panel_template = resolve_template_path(
         template_filename=_PANEL_TEMPLATE_FILENAME,
         content_dir=content_dir,
@@ -657,6 +688,7 @@ def _publish_episode_pipeline(
         rendered_panel=panel_rendered,
         rendered_image_prompt=image_prompt,
         cfg=cfg,
+        usage=tracker,
     )
     console.print(f"  archive image: [dim]{archive_image}[/dim]")
     console.print(f"  archive meta:  [dim]{archive_meta}[/dim]")
@@ -677,12 +709,14 @@ def _publish_episode_pipeline(
         )
         if dry_run:
             console.print("[green]✓ dry-run complete (nothing to do)[/green]")
+        _print_usage_summary(tracker)
         return
 
     if dry_run:
         for pub in publishers:
             console.print(f"[dim]·[/dim] [cyan]{pub.name}[/cyan]: dry-run (no post)")
         console.print("[green]✓ dry-run complete[/green]")
+        _print_usage_summary(tracker)
         return
 
     results = _run_publishers(publishers, episode_obj, archive_image)
@@ -707,6 +741,7 @@ def _publish_episode_pipeline(
     )
     state.append(entry)
     console.print(f"  state updated: [dim]{state_path}[/dim]")
+    _print_usage_summary(tracker)
 
 
 @app.command("publish-today")
@@ -849,7 +884,8 @@ def generate_scenarios(
     with _fail_on("load content pack"):
         pack = ContentPack.from_dir(content_dir, content_cfg=cfg.content)
 
-    openai = _build_openai_client(cfg)
+    tracker = UsageTracker()
+    openai = _build_openai_client(cfg, usage_tracker=tracker)
     scenario_template = resolve_template_path(
         template_filename=_SCENARIO_TEMPLATE_FILENAME,
         content_dir=content_dir,
@@ -894,6 +930,7 @@ def generate_scenarios(
         f"[green]✓ saved[/green] {output_path} ({len(scenarios.episodes)} episodes)"
     )
     console.print(f"  rendered prompt: [dim]{rendered_path}[/dim]")
+    _print_usage_summary(tracker)
 
 
 if __name__ == "__main__":  # pragma: no cover
