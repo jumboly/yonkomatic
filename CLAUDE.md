@@ -67,8 +67,9 @@ API キーやチャンネル ID 等の機密値は **設定オブジェクトに
 
 このリポジトリは **OSS テンプレート**。main には:
 
-- ✅ フレームワークコード、`examples/minimal/` のテキストのみのサンプル、ドキュメント、ワークフロー定義
-- ❌ 実キャラ素材、API キー、生成された参照画像 (ライセンス曖昧)、`scenarios/` `output/` `state/` の実データ
+- ✅ フレームワークコード、`examples/minimal/` のサンプル一式 (テキスト + プロジェクト保有の AI 生成リファレンス画像)、ドキュメント、ワークフロー定義
+- ❌ 利用者個別のキャラ素材、API キー、`scenarios/` `output/` `state/` の実データ
+- `examples/minimal/images/` の画像はプロジェクトが OSS ライセンス下で配布する用に保有するものに限定する。利用者は自前の画像に差し替えて運用する想定 (利用者ブランチ側で `images/` を上書き)
 
 `.gitignore` の `/scenarios/`, `/output/`, `/state/` は **先頭 `/` 必須**。`state/` だけだと `src/yonkomatic/state/` まで巻き込んでしまう。
 
