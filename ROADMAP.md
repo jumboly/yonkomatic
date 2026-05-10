@@ -9,33 +9,60 @@
 ## 現在地
 
 - **完了**: Step 1, Step 2, Step 3, Step 4, **Step 5 (5a/5b/5c/5d 全て + simplify)**, **Step 5e (実装 + A/B 検証完了)**, **Step 6 (実装完了 — テンプレ化 + OpenAI 切替 + 構造刷新)**, **Step 6.5 (gpt-image-2 + 1536x2048 採用、6/7 完全一致 / 0/7 致命的)**, **batch CLI (週単位 50% off)**, **モデル別ガイダンス機構 (scenario / panel-prompt 両 LLM)**
-- **次**: 下記「次セッションの再開タスク」を片付けてから Step 7 (OSS 公開準備)
+- **次**: 下記「次セッションの再開タスク」を片付けてから **Step 6.6 (Actions の batch 化)** → Step 7 (OSS 公開準備)
 - **ブロッカー**: なし
 
-最終更新: 2026-05-10 (モデル別ガイダンス + batch CLI 実走確認、品質再評価は次セッション)
+最終更新: 2026-05-10 (新ガイダンス効果評価 ep1/ep5 + 画像サイズ最適化で **960x1280 を本番デフォルト採用**。Step 6.6 (Actions の batch 化) を追加。LLM への参考画像連携は次セッション)
 
 ### 次セッションの再開タスク (Step 6.5 余波)
 
-**1. 新ガイダンスの画像レイヤ効果評価**
+**1. 新ガイダンスの画像レイヤ効果評価 — ep1/ep5 完了 (2026-05-10)**
 
-- batch で 2 話生成済み: `tmp/batch-W19-imgs/ep1.png` (風の向きの会議) / `ep5.png` (音だけ先に夏)
-- 元シナリオは `tmp/W19-with-guidance.yaml` (新 guidance 適用、SFX 込み、verbatim 角度のキャラ anchor)
+評価対象:
+- `tmp/batch-W19-imgs/ep1.png` (風の向きの会議) / `ep5.png` (音だけ先に夏)
+- 元シナリオ: `tmp/W19-with-guidance.yaml` (新 guidance 適用、SFX 込み、verbatim 角度のキャラ anchor)
 - batch manifest: `tmp/batch-W19-test.yaml` (status: completed, image batch $0.274 = sync の半額)
-- 突き合わせ観点: dialogue 一字一句一致 / SFX (『さわ』『ぶいーん』『りーん』) が描き込まれているか / panel 数厳守 / 話者スワップの有無
-- Step 6.5 のベースライン (`output/step6.5-gpt-image-2/`) と比較して新 guidance が **画像品質を実際に向上させたか** を判定
+- ベースライン: `output/step6.5-gpt-image-2/2026-05-04.png` (ep1=風の予告) / `2026-05-08.png` (ep5=植木鉢の会議)
+  - 注: ベースラインと新バッチは別シナリオ (W19 を再生成しているため)。同一エピソード比較ではなく、各々が自シナリオを忠実に描けたかと、Step 6.5 の品質水準 (6/7 完全一致) を維持/向上できたかで判定。
 
-**2. 画像サイズ最適化検討**
+評価結果:
 
-現在 `image_size: "1536x2048"` (3.15M pixels) は過剰の可能性あり ($0.27/枚)。gpt-image-2 が受け付ける真の 3:4 候補 (16 倍数 / 比率 3:1 以下):
+| 観点 | ベースライン (Step 6.5) | 新ガイダンス (ep1/ep5) |
+|---|---|---|
+| dialogue 一字一句一致 | 維持 (8/8 + 8/8) | 維持 (9/9 + 8/8) |
+| 4 panel 厳守 | 維持 | 維持 |
+| 話者スワップ | 1/7 で発生 (W19 全 7 話中) | 0/2 (サンプル少) |
+| **SFX 描画** | **不明瞭/未描画** | **明確に scene art に描画 (ep1=2件, ep5=3件 全て)** |
+| 吹出スタイル | 横書き中心 | 縦書き多め (日本語マンガらしい) |
 
-| サイズ | 総 pixels | 推定/枚 | batch (50%) | 備考 |
-|---|---|---|---|---|
-| 768x1024 | 786K | ~$0.07 | ~$0.035 | 試作向け |
-| 960x1280 | 1.23M | ~$0.11 | ~$0.055 | Slack 表示十分 |
-| **1152x1536** | **1.77M** | **~$0.16** | **~$0.08** | **バランス候補** |
-| 1536x2048 (現行) | 3.15M | ~$0.27 | ~$0.135 | 印刷向け、過剰気味 |
+**判定**: 新ガイダンス (Verbatim キャラ anchor / SFX 指示 / Sequential panel labels / Literal text in double quotes / Negative constraints 末尾集約) は **Step 6.5 の品質水準を維持しつつ SFX 描画を明確に改善**。特に ep5 では「りーん」が Panel 1/2/3 連続描画され、「音だけ先に夏」のオチが視覚的にも成立。
 
-判定方法: 同シナリオを 2-3 サイズで生成して並べて目視比較 (cost ~$0.30-0.50)。Slack/static_site の実表示サイズ (端末で 1024px 程度に縮小される) を踏まえて決定。
+**残課題**: サンプル数 2 話のため確度を上げるには ep2/ep3/ep4/ep6/ep7 を batch 投入して 7 話完走で再評価すべき。本番デフォルト化判定はそれを待ってから。
+
+**2. 画像サイズ最適化検討 — 1 話 4 サイズ完了 (2026-05-10)**
+
+ep1 (風の向きの会議) を 768/960/1152/1536 で生成 (sync 計 $0.53)、視認比較:
+
+| サイズ | 実コスト (sync) | batch 推定 | テキスト視認性 | SFX 描画 | キャラ造形 | 判定 |
+|---|---|---|---|---|---|---|
+| 768x1024 | $0.15 | ~$0.075 | 不足 (Slack で潰れる) | あり | 粗い | 不採用 |
+| **960x1280** | **$0.18** | **~$0.09** | 読める (全 dialogue 識別可) | くっきり | 認識可 | **本命** |
+| 1152x1536 | $0.20 | ~$0.10 | 綺麗 | 「ぶいーん」が矢印化 (1 サンプル) | 丁寧 | 候補 |
+| 1536x2048 (現行) | $0.27 (Step 6.5 batch $0.137) | ~$0.14 | 綺麗 | 明確 | 丁寧 | 過剰気味 |
+
+ROADMAP の旧見積もり「推定/枚」列は概ね sync 実コストと一致 (768 で乖離あり)。実コストは output_tokens に比例し、サイズ差ほどスケールしないことが判明 (768→1536 で output_tokens は約 1.85x のみ、ピクセル数は 4x)。
+
+保存後ファイル:
+- `tmp/size-comparison/ep1-768x1024.png` (1.46MB)
+- `tmp/size-comparison/ep1-960x1280.png` (2.25MB)
+- `tmp/size-comparison/ep1-1152x1536.png` (3.11MB)
+- `tmp/batch-W19-imgs/ep1.png` (5.08MB, 1536x2048 既存)
+
+**判定**: 本番デフォルトを **960x1280 に切替** (`config.yaml` 反映済み)。コスト -33% (1536x2048 比) で Slack/static_site の表示サイズ (端末で約 1024px に縮小される) に必要十分。印刷品質が必要な場合のみ 1536x2048 を CLI フラグ or config で opt-in。
+
+**残課題**:
+- 960x1280 で W19 全 7 話を batch 投入し、ガイダンス効果評価 (上記 1) と合わせて品質再検証
+- 1152x1536 は SFX 表現リスク (1 例で「ぶいーん」が矢印アイコン化) のため、印刷向け中間解像度として将来検討候補
 
 **3. 参考画像を LLM ステージにも渡す機構 (Option A + 軽量 B)**
 
@@ -287,6 +314,23 @@ yonkomatic batch-fetch-images --week 2026-W21
 
 (`publish-today` への自動連携は Step 7 で実装予定)
 
+### ⏳ Step 6.6 — GitHub Actions も batch 画像生成に切替
+
+**背景**: 現状の `daily-publish.yml` は毎朝 sync で 1 話ぶん画像生成 ($0.27/枚 × 7 = $1.89/週)。`batch-submit-images` / `batch-fetch-images` を使えば 50% off ($0.95/週)。週次で一括投入し、日次は fetch + publish のみで済む。
+
+**スコープ**:
+1. `weekly-scenarios.yml` を拡張: scenarios 生成直後に `batch-submit-images --week W` を実行 (24h cap で完走想定、月曜 09:00 JST には fetch 可能)
+2. `daily-publish.yml` を改修: `publish-today` 内部で「preflight 画像が存在すれば再生成せず使う」分岐を追加 (画像 API コール skip)
+3. preflight 画像が無いケース (batch 失敗 / 未投入) は従来通り sync で生成 (フォールバック)
+4. 月曜の `daily-publish` で `batch-fetch-images` を先行実行する step を追加
+
+**完了条件**:
+- 通常運用で月〜日 7 日分の画像が batch 経由で生成され、daily-publish は fetch + publish のみで動く
+- batch 失敗時は sync フォールバックで投稿は継続される (cron が止まらない)
+- `state/batches/{week}.yaml` の status を見て分岐できる
+
+**未決事項**: batch が 24h 以内に完走しなかった場合のリトライ戦略 (週途中で batch_id を再投入するか、その日だけ sync で繋ぐか)。
+
 ### ⏳ Step 7 — OSS 公開準備 (旧 Step 6) (次)
 
 - README に Quick Start + デモ画像
@@ -304,6 +348,10 @@ yonkomatic batch-fetch-images --week 2026-W21
 
 新しい決定が出たら頭に追加。古いものは削除せず残す。
 
+- **2026-05-10 (画像サイズ 960x1280 を本番採用)** ep1 を 768/960/1152/1536 (px) で sync 生成して比較 (計 $0.53)、**960x1280 を本番デフォルトに採用** (`config.yaml` 反映済み)。sync $0.18 / batch 推定 $0.09、Slack 表示で全 dialogue + SFX 視認可、1536x2048 比 -33% コスト。768x1024 は Slack で文字が潰れて不採用、1152x1536 は SFX「ぶいーん」が矢印アイコン化される現象が 1 例で出たため将来の印刷向け候補として保留、1536x2048 は印刷品質が必要な場合のみ opt-in。実コストは output_tokens に比例し、ピクセル数 4x でも tokens は 1.85x 程度しか増えないことが判明 (Step 6.5 当時の見積より乖離小)。
+- **2026-05-10 (Step 6.6 追加)** GitHub Actions も batch 画像生成に切り替える Step 6.6 を追加。weekly-scenarios で scenarios 生成→batch-submit-images、daily-publish で batch-fetch-images→publish-today (画像再生成 skip)。週次 $1.89 → $0.95 (50% off)。batch 失敗時の sync フォールバックは別途設計。
+- **2026-05-10 (CLI 拡張)** `test panel` に `--image-size` フラグを追加 (`_apply_cli_overrides` を image_size 対応に拡張)。サイズ比較用途を想定。publish/publish-today/batch-submit-images にも将来同様のフラグ追加余地あり (現時点では config.yaml の編集で十分)。
+- **2026-05-10 (新ガイダンス効果評価 ep1/ep5)** モデル別ガイダンス (Verbatim キャラ anchor / SFX 指示 / Sequential panel labels / Literal text in double quotes / Negative constraints 末尾集約) が **Step 6.5 ベースラインの品質水準を維持しつつ SFX 描画を明確に改善** することを 2 話で確認。ep1 では「さわ」「ぶいーん」、ep5 では「りーん」を Panel 1/2/3 連続描画。dialogue 17/17 一字一句一致、4 panel 厳守、話者スワップ 0/2。サンプル数が少ないため本番デフォルト化判定は ep2-4/6-7 を batch 投入して 7 話完走後に確定する。
 - **2026-05-10 (Step 6.5 検証で確定)** **gpt-image-2 + 1536x2048 (真の 3:4) を本番採用**。W19 全 7 話で完全一致 6/7 (86%) / 致命的 0/7 / 軽微 1/7 (話者スワップのみ)。Step 6 の gpt-image-1 (0/7 完全一致 / 7/7 致命的) から劇的改善。1024x1536 は実 2:3 でアスペクト比ミスマッチが「パネル数違反」「誤字幻覚」の主因と判明。gpt-image-2 はカスタムサイズ可 (各辺 16 の倍数 / 最大 3840px / 比率 3:1 以下) で comics をユースケース筆頭に謳っており、テキスト描画精度・指示遵守ともに gpt-image-1 比で一段上。
 - **2026-05-10 (Step 6.5)** OpenAI コール毎の token usage + コスト推定を実装。`UsageTracker` をクライアントに渡すと `complete` / `complete_structured` / `generate_image` の各レスポンスから `usage` を吸い上げ、`_PRICES` (2026-05-10 時点の標準料金) でコスト推定。`publish` 系は archive YAML の `usage` キーに per-model 集計を永続化。価格表は openai_client.py の冒頭にハードコード、料金改定時はそこを更新。
 - **2026-05-10 (Step 6.5)** **OpenAI Batch API は `/v1/images/generations` をサポート、料金は 50% off、completion window 24h** を確認。`yonkomatic batch-submit-images --week W` / `batch-fetch-images --week W` の 2-step を実装。submit と fetch を分離する設計理由: (a) batch は最大 24h 待つので 1 コマンドで block するとプロセスが弱い、(b) cron で「Sun submit / Mon fetch」のように分けやすい、(c) 失敗時の再試行が独立しやすい。reference image (`images.edit`) は multipart 専用で batch 非対応 → batch 経路では参考画像をスキップ。
