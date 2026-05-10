@@ -25,6 +25,26 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      - name: Compute today's ISO week
+        id: week
+        run: echo "value=$(TZ=Asia/Tokyo date +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      # Why fetch first: weekly-scenarios submits a 50%-off image batch on
+      # Sun 23:00 JST. Pulling it down before publish lets publish-today
+      # use the preflight image (skipping a sync API call). Idempotent —
+      # safe to re-run on a completed batch, and a no-op if the manifest
+      # is missing (fresh user branch / mid-rollout).
+      - name: Fetch weekly image batch (best-effort)
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -e "state/batches/${{ steps.week.outputs.value }}.yaml" ]; then
+            uv run yonkomatic batch-fetch-images --week "${{ steps.week.outputs.value }}"
+          else
+            echo "no batch manifest for ${{ steps.week.outputs.value }}; falling back to sync generation"
+          fi
+
       - name: Publish today's episode
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -40,7 +60,7 @@ jobs:
           # Why per-path guard: a fresh user branch may not yet have docs/
           # (static_site disabled) or output/archive/ (first run); skipping
           # nonexistent paths is the only suppression we want here.
-          for p in state docs output/archive; do
+          for p in state docs output/archive output/preflight; do
             [ -e "$p" ] && git add "$p"
           done
           if git diff --cached --quiet; then

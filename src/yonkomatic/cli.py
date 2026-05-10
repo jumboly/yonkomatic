@@ -623,6 +623,11 @@ def publish(
         "--dry-run",
         help="Generate image and write archive, but skip publishers and state update.",
     ),
+    no_preflight: bool = typer.Option(
+        False,
+        "--no-preflight",
+        help="Force fresh image generation even if a preflight image exists.",
+    ),
 ) -> None:
     """Run the full pipeline: scenario → image → multi-publish + archive."""
     cfg = _apply_cli_overrides(
@@ -642,6 +647,7 @@ def publish(
         state_path=state_path,
         archive_dir=archive_dir,
         dry_run=dry_run,
+        use_preflight=not no_preflight,
     )
 
 
@@ -655,34 +661,68 @@ def _publish_episode_pipeline(
     state_path: Path,
     archive_dir: Path,
     dry_run: bool,
+    use_preflight: bool = True,
 ) -> None:
     console.print(
         f"publishing for [cyan]{pub_date}[/cyan]: 「{episode_data.title}」 "
         f"(episode {episode_data.episode_number})"
     )
 
-    with _fail_on("load content pack"):
-        pack = ContentPack.from_dir(content_dir, content_cfg=cfg.content)
-
     tracker = UsageTracker()
-    openai = _build_openai_client(cfg, usage_tracker=tracker)
-    panel_template = resolve_template_path(
-        template_filename=_PANEL_TEMPLATE_FILENAME,
-        content_dir=content_dir,
-        builtin_dir=_builtin_templates_dir(),
-    )
-
-    console.print(f"asking [cyan]{cfg.ai.text_model}[/cyan] for image prompt…")
-    with _fail_on("prompt generation failed"):
-        image_prompt, panel_rendered = build_image_prompt(
-            episode=episode_data,
-            pack=pack,
-            openai=openai,
-            template_path=panel_template,
+    preflight_path: Path | None = None
+    if use_preflight:
+        preflight_path = _find_preflight_image(
+            episode_data.week, episode_data.episode_number
         )
 
-    merged_refs = _merge_refs(pack, refs)
-    image_result = _run_openai_image(cfg, openai, prompt=image_prompt, refs=merged_refs)
+    if preflight_path is not None:
+        console.print(f"  using preflight image: [dim]{preflight_path}[/dim]")
+        image_bytes = preflight_path.read_bytes()
+        mime_type = (
+            mimetypes.guess_type(str(preflight_path))[0] or "image/png"
+        )
+        image_result = ImageResult(image_bytes=image_bytes, mime_type=mime_type)
+
+        # Carry the prompts that produced this image into the archive so
+        # daily archives stay self-describing even when the API was not
+        # called today.
+        job_meta = (
+            _load_batch_job_meta(
+                episode_data.week, episode_data.episode_number
+            )
+            or {}
+        )
+        image_prompt = job_meta.get(
+            "rendered_image_prompt", "(preflight: prompt unavailable)"
+        )
+        panel_rendered = RenderedPrompt(
+            system="",
+            user=job_meta.get("rendered_panel_prompt", ""),
+        )
+    else:
+        with _fail_on("load content pack"):
+            pack = ContentPack.from_dir(content_dir, content_cfg=cfg.content)
+
+        openai = _build_openai_client(cfg, usage_tracker=tracker)
+        panel_template = resolve_template_path(
+            template_filename=_PANEL_TEMPLATE_FILENAME,
+            content_dir=content_dir,
+            builtin_dir=_builtin_templates_dir(),
+        )
+
+        console.print(f"asking [cyan]{cfg.ai.text_model}[/cyan] for image prompt…")
+        with _fail_on("prompt generation failed"):
+            image_prompt, panel_rendered = build_image_prompt(
+                episode=episode_data,
+                pack=pack,
+                openai=openai,
+                template_path=panel_template,
+            )
+
+        merged_refs = _merge_refs(pack, refs)
+        image_result = _run_openai_image(
+            cfg, openai, prompt=image_prompt, refs=merged_refs
+        )
 
     archive_image, archive_meta = _write_archive(
         archive_dir=archive_dir,
@@ -778,6 +818,11 @@ def publish_today(
     text_model: TextModelOption = None,
     image_model: ImageModelOption = None,
     dry_run: bool = typer.Option(False, "--dry-run"),
+    no_preflight: bool = typer.Option(
+        False,
+        "--no-preflight",
+        help="Force fresh image generation even if a preflight image exists.",
+    ),
 ) -> None:
     """Pick the next episode for today's ISO week from scenarios/, then publish."""
     cfg = _apply_cli_overrides(
@@ -832,6 +877,7 @@ def publish_today(
             state_path=state_path,
             archive_dir=archive_dir,
             dry_run=dry_run,
+            use_preflight=not no_preflight,
         )
     except typer.Exit:
         # The pipeline already printed a specific error; the notification
@@ -851,6 +897,39 @@ def _default_batch_manifest_path(week: str) -> Path:
 
 def _default_preflight_dir(week: str) -> Path:
     return Path("output/preflight") / week
+
+
+def _find_preflight_image(week: str | None, episode_number: int) -> Path | None:
+    """Return the preflight image path if it exists, else None.
+
+    Preflight images are pre-rendered by ``batch-fetch-images`` from the
+    weekly batch. ``publish-today`` consults this so the daily cron can
+    skip a sync image generation when the batch already produced one.
+    """
+    if week is None:
+        return None
+    candidate = _default_preflight_dir(week) / f"ep{episode_number}.png"
+    return candidate if candidate.exists() else None
+
+
+def _load_batch_job_meta(
+    week: str | None, episode_number: int
+) -> dict[str, Any] | None:
+    """Pull the per-episode metadata block from a saved batch manifest."""
+    if week is None:
+        return None
+    manifest_path = _default_batch_manifest_path(week)
+    if not manifest_path.exists():
+        return None
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+    return next(
+        (
+            j
+            for j in manifest.get("jobs", [])
+            if j.get("episode_number") == episode_number
+        ),
+        None,
+    )
 
 
 @app.command("batch-submit-images")

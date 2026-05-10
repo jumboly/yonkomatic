@@ -36,15 +36,26 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: uv run yonkomatic generate-scenarios --week "${{ steps.week.outputs.value }}"
 
+      # Why submit batch immediately: at 50% off, kicking off the week's 7
+      # images right after scenarios are written gives them ~10h to bake
+      # before the first daily-publish (Mon 09:00 JST), well within the
+      # batch's 24h completion window.
+      - name: Submit weekly image batch
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: uv run yonkomatic batch-submit-images --week "${{ steps.week.outputs.value }}"
+
       - name: Commit and push if changed
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add scenarios/
+          for p in scenarios state/batches; do
+            [ -e "$p" ] && git add "$p"
+          done
           if git diff --cached --quiet; then
-            echo "no scenario changes (already up to date)"
+            echo "no scenario / batch changes (already up to date)"
           else
-            git commit -m "bot: scenarios for week ${{ steps.week.outputs.value }}"
+            git commit -m "bot: scenarios + batch for week ${{ steps.week.outputs.value }}"
             # Why pull --rebase --autostash: a daily-publish run may have
             # advanced main since checkout; without this push would 403.
             git pull --rebase --autostash
